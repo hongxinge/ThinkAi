@@ -1,0 +1,87 @@
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thinkai-framework"
+version = "0.2.1"
+description = "Enterprise-grade AI framework for seamless LLM integration"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [
+    {name = "ThinkAi Team", email = "thinkai@example.com"}
+]
+keywords = ["ai", "llm", "fastapi", "openai", "ollama", "rag", "agent"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "httpx>=0.24.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    "tenacity>=8.0.0",
+]
+
+[project.optional-dependencies]
+web = ["fastapi>=0.100.0"]
+ollama = ["ollama>=0.1.0"]
+openai = ["openai>=1.0.0"]
+qwen = ["dashscope>=1.0.0"]
+deepseek = ["openai>=1.0.0"]
+claude = ["anthropic>=0.7.0"]
+gemini = ["google-generativeai>=0.3.0"]
+rag = [
+    "chromadb>=0.4.0",
+    "tiktoken>=0.5.0",
+    "pypdf>=3.0",
+    "python-docx>=0.8.0",
+]
+agent = ["openai>=1.0.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+]
+all = [
+    "thinkai[web,ollama,openai,qwen,deepseek,claude,gemini,rag,agent]",
+]
+
+[project.urls]
+Homepage = "https://github.com/thinkai/thinkai"
+Documentation = "https://thinkai.readthedocs.io"
+Repository = "https://github.com/thinkai/thinkai"
+Issues = "https://github.com/thinkai/thinkai/issues"
+
+[project.scripts]
+thinkai = "thinkai.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["thinkai*"]
+
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

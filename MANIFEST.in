@@ -1,0 +1,6 @@
+include README.md
+include LICENSE
+include .env.example
+include config.example.yaml
+recursive-include examples *
+recursive-include thinkai *.py
