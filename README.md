@@ -2,6 +2,15 @@
 
 基于Python异步的企业级AI大模型集成框架 - **开箱即用,简单易用,功能全面**
 
+[![Gitee](https://img.shields.io/badge/Gitee-ThinkAi-red)](https://gitee.com/hongxinge/think-ai)
+[![GitHub](https://img.shields.io/badge/GitHub-ThinkAi-black)](https://github.com/hongxinge/ThinkAi)
+[![PyPI](https://img.shields.io/pypi/v/thinkai-framework)](https://pypi.org/project/thinkai-framework/)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+- 🏠 Gitee: https://gitee.com/hongxinge/think-ai
+- 🌐 GitHub: https://github.com/hongxinge/ThinkAi
+- 📦 PyPI: https://pypi.org/project/thinkai-framework/
+
 ## 特性
 
 - **轻量零依赖** - 核心框架不依赖任何Web框架,完全脱离FastAPI
