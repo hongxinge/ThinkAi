@@ -173,10 +173,11 @@ class RAGPipeline:
         
         if not context_docs:
             # 没有检索到文档,直接提问
-            return await self.ai_client.complete(question)
+            response = await self.ai_client.chat(question)
+            return response.content
         
         # 2. 构建上下文
-        context = "\n\n".join([doc["content"] for doc in context_docs])
+        context = "\n\n".join([doc["text"] for doc in context_docs])
         
         # 3. 构建增强Prompt
         template_name = prompt_template or "rag_query"
@@ -187,9 +188,9 @@ class RAGPipeline:
         )
         
         # 4. 生成回答
-        response = await self.ai_client.complete(prompt)
+        response = await self.ai_client.chat(prompt)
         
-        return response
+        return response.content
 
     async def add_document(self, document_path: str):
         """添加单个文档"""

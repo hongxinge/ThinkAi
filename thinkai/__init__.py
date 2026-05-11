@@ -1,10 +1,10 @@
 """
 ThinkAi - Enterprise-grade AI Framework
-基于FastAPI的企业级AI大模型集成框架
+基于Python异步的企业级AI大模型集成框架
 开箱即用,支持多模型,RAG,Agent等核心能力
 """
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 __author__ = "ThinkAi Team"
 
 from thinkai.core.client import ThinkAI

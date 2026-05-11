@@ -22,7 +22,7 @@
 # 基础安装 (轻量核心,无任何Web框架依赖)
 pip install thinkai-framework
 
-# Web开发支持
+# Web开发支持（安装FastAPI依赖，用于构建API服务）
 pip install thinkai-framework[web]
 
 # 安装特定Provider

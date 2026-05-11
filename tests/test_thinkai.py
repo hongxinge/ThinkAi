@@ -14,7 +14,7 @@ class TestThinkAICore:
         """测试导入"""
         import thinkai
         assert hasattr(thinkai, '__version__')
-        assert thinkai.__version__ == "0.2.1"
+        assert thinkai.__version__ == "0.2.2"
 
     def test_create_client(self):
         """测试创建客户端"""

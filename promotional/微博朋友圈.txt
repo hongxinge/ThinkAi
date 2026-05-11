@@ -1,0 +1,26 @@
+🤖 一行代码调用13个AI大模型！
+
+别再手动配置每个AI了！ThinkAi框架让你像用requests一样简单调用：
+
+✅ OpenAI GPT
+✅ DeepSeek
+✅ 通义千问
+✅ GLM
+✅ 百度文心
+✅ 腾讯混元
+✅ 豆包
+✅ Kimi
+✅ MiniMax
+✅ Claude
+✅ Gemini
+✅ Ollama
+✅ 任意OpenAI兼容API
+
+pip install thinkai-framework
+
+MIT开源，完全免费！
+
+🔗 https://pypi.org/project/thinkai-framework/
+🔗 https://gitee.com/hongxinge/think-ai
+
+#Python #AI #大模型 #OpenAI #开源
