@@ -22,6 +22,7 @@ from thinkai.skill import Skill, SkillManager, skill_manager
 from thinkai.skill import WebSearchSkill, CodeSkill, MathSkill, FileSkill
 from thinkai.skill.builtin_skills import DatabaseSkill, APISkill, ImageSkill, TextSkill, SystemSkill
 from thinkai.memory import MemoryManager, MemoryItem, MemoryStore, FileMemoryStore
+from thinkai.mcp import MCPAdapter, MCPServerClient, MCPTool, MCPRegistry
 
 __all__ = [
     "ThinkAI",
@@ -56,4 +57,8 @@ __all__ = [
     "MemoryItem",
     "MemoryStore",
     "FileMemoryStore",
+    "MCPAdapter",
+    "MCPServerClient",
+    "MCPTool",
+    "MCPRegistry",
 ]
