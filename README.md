@@ -21,7 +21,8 @@
 - **流式响应** - 支持SSE流式输出
 - **会话管理** - 内置多轮对话上下文管理
 - **RAG支持** - 3行代码实现检索增强生成
-- **Agent系统** - 内置ReAct Agent,支持工具调用
+- **Agent系统** - 内置ReAct Agent和Function Calling Agent
+- **Skill系统** - 可复用AI能力包(搜索/代码/数学/文件操作)
 - **中间件管道** - 日志、重试、缓存、限流
 - **企业级性能** - 异步架构,连接池,自动重试
 
@@ -132,33 +133,41 @@ answer = await rag.query("ThinkAi框架支持哪些AI模型?")
 print(answer)
 ```
 
-### 7. Agent(智能体)
+### 7. Function Calling Agent(函数调用智能体)
 
 ```python
 from thinkai import ThinkAI
-from thinkai.agent import ReActAgent, Tool
+from thinkai.agent import FunctionCallingAgent
+from thinkai.skill import MathSkill, CodeSkill
 
-# 定义工具
-@Tool(name="calculator", description="计算数学表达式")
-def calculator(expression: str) -> str:
-    return str(eval(expression))
+ai = ThinkAI(provider="openai", api_key="your-key")
 
-@Tool(name="search", description="搜索信息")
-async def search(query: str) -> str:
-    # 实现搜索逻辑
-    return "搜索结果"
-
-ai = ThinkAI()
-
-# 创建Agent
-agent = ReActAgent(
-    tools=[calculator, search],
+agent = FunctionCallingAgent(
+    name="math-coder",
+    tools=[MathSkill().get_tools(), CodeSkill().get_tools()],
     ai_client=ai,
     verbose=True,
 )
 
-# 运行任务
-result = await agent.run("计算25*48,然后搜索Python的相关信息")
+result = await agent.run("计算123*456,然后用Python写一个斐波那契数列函数")
+print(result)
+```
+
+### 8. Skill(技能组合)
+
+```python
+from thinkai import ThinkAI
+from thinkai.skill import skill_manager, MathSkill, WebSearchSkill
+
+ai = ThinkAI(provider="openai", api_key="your-key")
+
+agent = skill_manager.create_agent(
+    ai_client=ai,
+    skill_names=["math", "code"],
+    system_prompt="You are a helpful assistant with math and coding skills.",
+)
+
+result = await agent.run("计算2的10次方")
 print(result)
 ```
 
@@ -245,6 +254,12 @@ thinkai/
 │   ├── middleware/     # 中间件
 │   ├── rag/            # RAG模块
 │   ├── agent/          # Agent模块
+│   │   ├── base.py     # Agent基类
+│   │   ├── react.py    # ReAct Agent
+│   │   ├── function_calling.py  # Function Calling Agent
+│   │   └── tool.py     # Tool定义
+│   ├── skill/          # Skill系统
+│   │   ├── __init__.py # Skill基类和内置Skill
 │   ├── streaming.py    # 流式处理
 │   └── exceptions.py   # 异常定义
 ├── examples/           # 示例代码

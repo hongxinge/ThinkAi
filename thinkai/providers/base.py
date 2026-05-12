@@ -11,6 +11,9 @@ from thinkai.core.models import (
     ChatMessage,
     StreamChunk,
     Usage,
+    ToolCall,
+    FunctionCall,
+    ChatChoice,
 )
 from thinkai.core.config import Settings, ModelConfig
 from thinkai.exceptions import (
@@ -216,16 +219,34 @@ class BaseProvider(ABC):
         解析响应 - 默认按OpenAI格式解析
         子类可覆盖以适配不同API
         """
+        def parse_message(choice: Dict[str, Any]) -> ChatMessage:
+            msg_data = choice["message"]
+            tool_calls = None
+            if "tool_calls" in msg_data:
+                tool_calls = [
+                    ToolCall(
+                        id=tc["id"],
+                        type=tc.get("type", "function"),
+                        function=FunctionCall(
+                            name=tc["function"]["name"],
+                            arguments=tc["function"]["arguments"],
+                        ),
+                    )
+                    for tc in msg_data["tool_calls"]
+                ]
+            return ChatMessage(
+                role=msg_data["role"],
+                content=msg_data.get("content"),
+                tool_calls=tool_calls,
+            )
+
         return ChatResponse(
             id=response_data.get("id", ""),
             model=response_data.get("model", self.model),
             choices=[
                 ChatChoice(
                     index=choice.get("index", 0),
-                    message=ChatMessage(
-                        role=choice["message"]["role"],
-                        content=choice["message"].get("content"),
-                    ),
+                    message=parse_message(choice),
                     finish_reason=choice.get("finish_reason"),
                 )
                 for choice in response_data.get("choices", [])
