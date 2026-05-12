@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "thinkai-framework"
-version = "0.3.0"
+version = "0.4.0"
 description = "Enterprise-grade AI framework for seamless LLM integration"
 readme = "README.md"
 license = "MIT"

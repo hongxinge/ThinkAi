@@ -5,6 +5,7 @@ import inspect
 from thinkai.agent.tool import Tool, tool
 from thinkai.agent.function_calling import FunctionCallingAgent
 from thinkai.core.client import ThinkAI
+from thinkai.skill.builtin_skills import DatabaseSkill, APISkill, ImageSkill, TextSkill, SystemSkill
 
 
 class Skill:
@@ -256,3 +257,8 @@ skill_manager.register(WebSearchSkill())
 skill_manager.register(CodeSkill())
 skill_manager.register(MathSkill())
 skill_manager.register(FileSkill())
+skill_manager.register(DatabaseSkill())
+skill_manager.register(APISkill())
+skill_manager.register(ImageSkill())
+skill_manager.register(TextSkill())
+skill_manager.register(SystemSkill())
