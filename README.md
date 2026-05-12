@@ -21,8 +21,11 @@
 - **流式响应** - 支持SSE流式输出
 - **会话管理** - 内置多轮对话上下文管理
 - **RAG支持** - 3行代码实现检索增强生成
-- **Agent系统** - 内置ReAct Agent和Function Calling Agent
-- **Skill系统** - 可复用AI能力包(搜索/代码/数学/文件操作)
+- **Agent系统** - 内置ReAct Agent、Function Calling Agent、流式Function Calling Agent
+- **Skill系统** - 9大内置Skill(搜索/代码/数学/文件/数据库/API/图像/文本/系统)
+- **记忆系统** - 长期记忆、跨会话记忆、自动遗忘、重要性衰减
+- **多Agent协作** - Sequential/Parallel/Hierarchical三种协作模式
+- **MCP支持** - 轻量级Model Context Protocol客户端
 - **中间件管道** - 日志、重试、缓存、限流
 - **企业级性能** - 异步架构,连接池,自动重试
 
