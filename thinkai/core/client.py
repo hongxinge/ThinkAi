@@ -383,6 +383,13 @@ class ThinkAI:
         if self.session_manager:
             await self.session_manager.close()
 
+    @property
+    def structured(self):
+        from thinkai.structured import StructuredOutput
+        if not hasattr(self, '_structured'):
+            self._structured = StructuredOutput(self)
+        return self._structured
+
     async def __aenter__(self):
         return self
 

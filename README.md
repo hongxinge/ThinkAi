@@ -28,6 +28,14 @@
 - **多Agent协作** - Sequential/Parallel/Hierarchical三种协作模式
 - **MCP支持** - 轻量级Model Context Protocol客户端
 - **中间件管道** - 日志、重试(真正有效),可扩展
+- **缓存层** - LRU内存缓存/文件缓存,减少重复API调用
+- **结构化输出** - Pydantic模型约束LLM输出,自动JSON解析与验证
+- **速率限制** - Token Bucket限流 + 并发控制,企业级流量管理
+- **追踪可观测** - TraceSpan链路追踪,Console/JSON导出
+- **Agent状态持久化** - 保存/恢复Agent执行状态,支持断点续跑
+- **插件系统** - 动态加载外部Skill/Provider/Middleware,可扩展
+- **@tool装饰器** - 一行代码创建Tool,自动推断参数Schema
+- **16种Prompt模板** - CoT/Few-Shot/翻译/代码审查/测试生成等
 - **企业级安全** - 代码沙箱执行、文件路径限制、环境变量访问控制
 - **企业级性能** - 异步架构,连接池,自动重试
 - **CLI工具** - 命令行直接对话
@@ -410,11 +418,15 @@ thinkai/
 │   │   └── builtin_skills.py # 更多内置Skill
 │   ├── memory/         # 记忆系统
 │   ├── mcp/            # MCP协议支持
+│   ├── cache/          # 缓存层(Memory/File)
+│   ├── structured/     # 结构化输出
+│   ├── tracing/        # 链路追踪
+│   ├── plugin/         # 插件系统
 │   ├── sync.py         # 同步API封装
 │   ├── cli.py          # CLI命令行工具
 │   ├── streaming.py    # 流式处理
 │   └── exceptions.py   # 异常定义
-├── tests/              # 测试(169个测试用例)
+├── tests/              # 测试(223个测试用例)
 ├── pyproject.toml      # 项目配置
 └── README.md
 ```
@@ -537,13 +549,180 @@ class CustomProvider(BaseProvider):
         pass
 ```
 
+### 缓存层(减少重复API调用)
+
+```python
+from thinkai import ThinkAI
+from thinkai.cache import CacheMiddleware, MemoryCache, cached
+
+ai = ThinkAI()
+
+# 方式1: 中间件缓存(自动缓存chat请求)
+ai.add_middleware(CacheMiddleware(ttl=300))
+
+# 方式2: 独立缓存
+cache = MemoryCache(max_size=1000, default_ttl=3600)
+await cache.set("query:hello", {"content": "你好!"})
+result = await cache.get("query:hello")
+
+# 方式3: @cached装饰器
+@cached(ttl=300)
+async def ask_ai(question: str):
+    return await ai.chat(question)
+```
+
+### 结构化输出(Pydantic模型约束)
+
+```python
+from thinkai import ThinkAI
+from pydantic import BaseModel, Field
+
+ai = ThinkAI(provider="openai", api_key="your-key")
+
+class PersonInfo(BaseModel):
+    name: str = Field(description="人名")
+    age: int = Field(description="年龄")
+    occupation: str = Field(description="职业")
+
+# 自动生成Schema Prompt + JSON解析 + Pydantic验证
+person = await ai.structured.extract(
+    "张三今年28岁,是一名软件工程师",
+    PersonInfo,
+)
+print(person.name)        # 张三
+print(person.age)         # 28
+print(person.occupation)  # 软件工程师
+```
+
+### @tool装饰器(一行创建工具)
+
+```python
+from thinkai.agent import FunctionCallingAgent
+from thinkai.agent.tool import tool
+
+@tool
+def search_web(query: str, num_results: int = 5) -> str:
+    """Search the web for information."""
+    return f"Results for: {query}"
+
+@tool(name="calculator", description="Perform calculations")
+def calculate(expression: str) -> str:
+    """Calculate a math expression."""
+    return str(eval(expression))
+
+agent = FunctionCallingAgent(tools=[search_web, calculate], ai_client=ai)
+```
+
+### 速率限制(企业级流量管理)
+
+```python
+from thinkai import ThinkAI
+from thinkai.middleware.rate_limit import RateLimitMiddleware
+
+ai = ThinkAI()
+
+# 60请求/分钟, 最大10并发
+ai.add_middleware(RateLimitMiddleware(
+    requests_per_minute=60,
+    burst=10,
+    max_concurrent=10,
+))
+```
+
+### 链路追踪(可观测性)
+
+```python
+from thinkai.tracing import get_tracer, ConsoleTraceExporter, TraceCallback
+
+tracer = get_tracer()
+tracer.add_exporter(ConsoleTraceExporter())
+
+# 方式1: 上下文管理器
+async with tracer.trace("chat_request", model="gpt-4"):
+    response = await ai.chat("你好")
+
+# 方式2: Agent生命周期回调
+callback = TraceCallback(tracer)
+agent = FunctionCallingAgent(
+    ai_client=ai,
+    on_start=callback.on_start,
+    on_tool_call=callback.on_tool_call,
+    on_tool_result=callback.on_tool_result,
+    on_finish=callback.on_finish,
+    on_error=callback.on_error,
+)
+```
+
+### Agent状态持久化(断点续跑)
+
+```python
+from thinkai.agent import FunctionCallingAgent
+from thinkai.agent.state import PersistentAgentMixin, FileStateStorage
+
+# 创建带持久化的Agent
+class MyAgent(FunctionCallingAgent, PersistentAgentMixin):
+    pass
+
+agent = MyAgent(ai_client=ai)
+storage = FileStateStorage(storage_dir="./agent_states")
+
+# 保存状态
+state_id = await agent.save_state(storage)
+
+# 恢复状态(断点续跑)
+await agent.restore_state(state_id, storage)
+result = await agent.run("继续之前的任务")
+```
+
+### 插件系统(动态扩展)
+
+```python
+from thinkai.plugin import thinkai_plugin, plugin_manager
+
+# 定义插件
+@thinkai_plugin(name="my-skill", version="1.0", description="自定义Skill", plugin_type="skill")
+class MyCustomSkill:
+    def get_tools(self):
+        return [...]
+
+# 安装到框架
+plugin_manager.install_skill("my-skill", skill_manager)
+```
+
+### 更多Prompt模板
+
+```python
+from thinkai.prompt.template import prompt_manager
+
+# Chain-of-Thought推理
+prompt = prompt_manager.format("chain_of_thought", question="为什么天空是蓝色的?")
+
+# Few-Shot学习
+prompt = prompt_manager.format("few_shot", examples="Q:2+2? A:4", question="Q:3+3?")
+
+# 代码审查
+prompt = prompt_manager.format("code_review", language="Python", code="def add(a,b): return a+b")
+
+# 翻译
+prompt = prompt_manager.format("translate", source_lang="English", target_lang="Chinese", text="Hello")
+
+# 测试生成
+prompt = prompt_manager.format("test_generation", language="Python", code="def add(a,b): return a+b")
+```
+
 ## 企业级特性
 
 - **异步架构** - 全面使用async/await,高性能
 - **同步封装** - SyncThinkAI让简单脚本无需async/await
 - **连接池** - HTTP连接复用,可配置连接池大小
 - **自动重试** - 真正有效的重试机制,指数退避
+- **缓存层** - LRU内存缓存/文件缓存,减少API调用
+- **速率限制** - Token Bucket限流 + 并发控制
+- **链路追踪** - TraceSpan链路追踪,Console/JSON导出
 - **安全沙箱** - 代码执行、文件访问、环境变量多层保护
+- **结构化输出** - Pydantic模型约束LLM输出
+- **状态持久化** - Agent断点续跑
+- **插件系统** - 动态加载Skill/Provider/Middleware
 - **错误处理** - 完善的异常体系
 - **类型安全** - 完整的Type Hints + Pydantic验证
 - **日志记录** - 结构化日志支持

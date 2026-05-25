@@ -5,6 +5,14 @@ from thinkai.agent.react import ReActAgent
 from thinkai.agent.function_calling import FunctionCallingAgent
 from thinkai.agent.streaming_fc import StreamingFunctionCallingAgent, StreamingFunctionCallResult
 from thinkai.agent.orchestrator import MultiAgentOrchestrator, AgentRole, Task, TaskStatus
+from thinkai.agent.state import (
+    AgentState,
+    StateStorage,
+    FileStateStorage,
+    MemoryStateStorage,
+    PersistentAgentMixin,
+    create_state_storage,
+)
 
 __all__ = [
     "Agent",
@@ -19,4 +27,10 @@ __all__ = [
     "AgentRole",
     "Task",
     "TaskStatus",
+    "AgentState",
+    "StateStorage",
+    "FileStateStorage",
+    "MemoryStateStorage",
+    "PersistentAgentMixin",
+    "create_state_storage",
 ]

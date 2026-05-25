@@ -143,3 +143,63 @@ Current task: $task
 Think step by step and use tools when needed.""",
     category="agent",
 )
+
+prompt_manager.register(
+    "chain_of_thought",
+    "Let's think step by step about: $question\n\nPlease reason through this problem step by step, showing your work at each stage.",
+    category="reasoning",
+)
+
+prompt_manager.register(
+    "few_shot",
+    "Here are some examples:\n\n$examples\n\nNow, following the same pattern, answer: $question",
+    category="reasoning",
+)
+
+prompt_manager.register(
+    "summarize",
+    "Please summarize the following text concisely, capturing the key points:\n\n$text",
+    category="text",
+)
+
+prompt_manager.register(
+    "translate",
+    "Translate the following text from $source_lang to $target_lang:\n\n$text",
+    category="text",
+)
+
+prompt_manager.register(
+    "code_review",
+    "Review the following $language code and provide feedback on:\n- Code quality\n- Potential bugs\n- Performance issues\n- Security concerns\n- Suggestions for improvement\n\n```$language\n$code\n```",
+    category="code",
+)
+
+prompt_manager.register(
+    "data_extraction",
+    "Extract the following information from the text: $fields\n\nText:\n$text\n\nOutput the extracted data as a JSON object.",
+    category="text",
+)
+
+prompt_manager.register(
+    "role_play",
+    "You are $role, $role_description. Respond in character to the following:\n\n$message",
+    category="creative",
+)
+
+prompt_manager.register(
+    "debate",
+    "Present arguments for and against the following proposition: $proposition\n\nFor:\nAgainst:\nConclusion:",
+    category="reasoning",
+)
+
+prompt_manager.register(
+    "api_design",
+    "Design a RESTful API for $service_description. Include:\n- Endpoints\n- Request/Response formats\n- Error codes\n- Authentication method",
+    category="code",
+)
+
+prompt_manager.register(
+    "test_generation",
+    "Generate comprehensive unit tests for the following $language code. Include edge cases and error scenarios:\n\n```$language\n$code\n```",
+    category="code",
+)
