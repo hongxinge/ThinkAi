@@ -97,6 +97,41 @@ class StreamingFunctionCallingAgent(Agent):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
+    @staticmethod
+    def _merge_tool_calls(
+        accumulated: List[ToolCall],
+        delta_calls: Optional[List[ToolCall]],
+    ) -> List[ToolCall]:
+        """合并流式增量 tool_calls 到累积列表"""
+        if not delta_calls:
+            return accumulated
+
+        for delta_tc in delta_calls:
+            idx = None
+            if delta_tc.id:
+                for i, existing in enumerate(accumulated):
+                    if existing.id == delta_tc.id:
+                        idx = i
+                        break
+
+            if idx is not None:
+                existing = accumulated[idx]
+                if delta_tc.function.name:
+                    existing.function.name += delta_tc.function.name
+                if delta_tc.function.arguments:
+                    existing.function.arguments += delta_tc.function.arguments
+            else:
+                accumulated.append(ToolCall(
+                    id=delta_tc.id or "",
+                    type=delta_tc.type,
+                    function=FunctionCall(
+                        name=delta_tc.function.name or "",
+                        arguments=delta_tc.function.arguments or "",
+                    ),
+                ))
+
+        return accumulated
+
     async def run_stream(
         self,
         task: str,
@@ -104,6 +139,10 @@ class StreamingFunctionCallingAgent(Agent):
     ) -> AsyncIterator[StreamingFunctionCallResult]:
         """
         流式运行Function Calling Agent
+
+        使用 chat_stream 实现真正的流式输出:
+        - 最终答案: 逐 chunk 实时 yield
+        - 工具调用: 累积完整 tool_calls 后执行, yield 工具结果, 继续循环
 
         Args:
             task: 任务描述
@@ -129,52 +168,79 @@ class StreamingFunctionCallingAgent(Agent):
             iteration += 1
             self._log(f"Iteration {iteration}")
 
-            # 构建请求参数
-            request_params = {
+            request_params: Dict[str, Any] = {
                 "messages": messages,
                 "model": self.model,
             }
             if has_tools:
                 request_params["tools"] = tools_spec
 
-            # 检查响应是否有 tool_calls
-            # 先获取完整响应来判断
-            response = await self.ai_client.chat(**request_params)
-            assistant_msg = response.message
-            messages.append(assistant_msg)
+            accumulated_content = ""
+            accumulated_tool_calls: List[ToolCall] = []
+            has_tool_calls = False
 
-            if assistant_msg.tool_calls:
-                self._log(f"Tool calls: {len(assistant_msg.tool_calls)}")
+            stream = self.ai_client.chat_stream(**request_params)
 
-                for tool_call in assistant_msg.tool_calls:
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+
+                choice = chunk.choices[0]
+                delta = choice.delta
+
+                if delta.content:
+                    accumulated_content += delta.content
+
+                if delta.tool_calls:
+                    has_tool_calls = True
+                    accumulated_tool_calls = self._merge_tool_calls(
+                        accumulated_tool_calls, delta.tool_calls
+                    )
+
+                if not has_tool_calls and delta.content:
+                    result = StreamingFunctionCallResult()
+                    result.add_content(delta.content)
+                    result.is_final_answer = False
+                    yield result
+
+                finish = choice.finish_reason
+                if finish in ("stop", "tool_calls"):
+                    break
+
+            if has_tool_calls:
+                assistant_msg = ChatMessage(
+                    role="assistant",
+                    content=accumulated_content or None,
+                    tool_calls=accumulated_tool_calls,
+                )
+                messages.append(assistant_msg)
+
+                self._log(f"Tool calls: {len(accumulated_tool_calls)}")
+
+                for tool_call in accumulated_tool_calls:
                     tool_name = tool_call.function.name
                     try:
                         func_args = json.loads(tool_call.function.arguments)
                     except json.JSONDecodeError:
                         func_args = {"input": tool_call.function.arguments}
 
-                    # 通知工具开始执行
                     if self.on_tool_start:
                         self.on_tool_start(tool_name, func_args)
 
                     self._log(f"Executing: {tool_name}({tool_call.function.arguments})")
 
-                    # 执行工具
-                    result = await self._execute_tool_call(tool_call)
-                    self._log(f"Result: {result}")
+                    result_str = await self._execute_tool_call(tool_call)
+                    self._log(f"Result: {result_str}")
 
-                    # 通知工具执行完成
                     if self.on_tool_end:
-                        self.on_tool_end(tool_name, result)
+                        self.on_tool_end(tool_name, result_str)
 
-                    # 添加工具结果到消息列表
                     messages.append(ChatMessage(
                         role="tool",
-                        content=result,
+                        content=result_str,
                         tool_call_id=tool_call.id,
                     ))
 
-                    # 返回工具调用结果
                     tool_result = StreamingFunctionCallResult()
                     tool_result.tool_calls = [{
                         "name": tool_name,
@@ -182,21 +248,17 @@ class StreamingFunctionCallingAgent(Agent):
                     }]
                     tool_result.tool_results = [{
                         "name": tool_name,
-                        "result": result,
+                        "result": result_str,
                     }]
                     yield tool_result
             else:
-                # 没有工具调用,流式输出最终答案
-                final_answer = assistant_msg.content or ""
-                self._log(f"Final Answer: {final_answer}")
+                self._log(f"Final Answer: {accumulated_content}")
 
-                result = StreamingFunctionCallResult()
-                result.content_chunks = [final_answer]
-                result.is_final_answer = True
-                yield result
+                final_result = StreamingFunctionCallResult()
+                final_result.is_final_answer = True
+                yield final_result
                 return
 
-        # 达到最大迭代次数
         result = StreamingFunctionCallResult()
         result.content_chunks = ["Error: Max iterations reached"]
         result.is_final_answer = True

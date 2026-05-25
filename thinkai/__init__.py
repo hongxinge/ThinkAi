@@ -4,7 +4,7 @@ ThinkAi - Enterprise-grade AI Framework
 开箱即用,支持多模型,RAG,Agent,Skill,Memory等核心能力
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __author__ = "ThinkAi Team"
 
 from thinkai.core.client import ThinkAI
@@ -23,6 +23,7 @@ from thinkai.skill import WebSearchSkill, CodeSkill, MathSkill, FileSkill
 from thinkai.skill.builtin_skills import DatabaseSkill, APISkill, ImageSkill, TextSkill, SystemSkill
 from thinkai.memory import MemoryManager, MemoryItem, MemoryStore, FileMemoryStore
 from thinkai.mcp import MCPAdapter, MCPServerClient, MCPTool, MCPRegistry
+from thinkai.sync import SyncThinkAI
 
 __all__ = [
     "ThinkAI",
@@ -61,4 +62,5 @@ __all__ = [
     "MCPServerClient",
     "MCPTool",
     "MCPRegistry",
+    "SyncThinkAI",
 ]

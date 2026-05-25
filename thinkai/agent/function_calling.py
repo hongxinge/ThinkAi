@@ -29,6 +29,11 @@ class FunctionCallingAgent(Agent):
         verbose: bool = False,
         ai_client: Optional[ThinkAI] = None,
         system_prompt: Optional[str] = None,
+        on_start: Optional[Callable[[str], None]] = None,
+        on_tool_call: Optional[Callable[[str, Dict], None]] = None,
+        on_tool_result: Optional[Callable[[str, str], None]] = None,
+        on_finish: Optional[Callable[[str], None]] = None,
+        on_error: Optional[Callable[[Exception], None]] = None,
     ):
         super().__init__(
             name=name,
@@ -37,6 +42,11 @@ class FunctionCallingAgent(Agent):
             max_iterations=max_iterations,
             verbose=verbose,
             ai_client=ai_client,
+            on_start=on_start,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
+            on_finish=on_finish,
+            on_error=on_error,
         )
         self.system_prompt = system_prompt or "You are a helpful assistant that can use tools to complete tasks."
 
@@ -52,18 +62,26 @@ class FunctionCallingAgent(Agent):
         except json.JSONDecodeError:
             func_args = {"input": tool_call.function.arguments}
 
+        self._emit_hook("on_tool_call", func_name, func_args if isinstance(func_args, dict) else {"input": func_args})
+
         tool = self.get_tool(func_name)
         if not tool:
-            return json.dumps({"error": f"Tool '{func_name}' not found"})
+            result = json.dumps({"error": f"Tool '{func_name}' not found"})
+            self._emit_hook("on_tool_result", func_name, result)
+            return result
 
         try:
             if isinstance(func_args, dict):
-                result = await tool.execute(**func_args)
+                raw_result = await tool.execute(**func_args)
             else:
-                result = await tool.execute(input=func_args)
-            return json.dumps({"result": result})
+                raw_result = await tool.execute(input=func_args)
+            result = json.dumps({"result": raw_result})
+            self._emit_hook("on_tool_result", func_name, result)
+            return result
         except Exception as e:
-            return json.dumps({"error": str(e)})
+            result = json.dumps({"error": str(e)})
+            self._emit_hook("on_tool_result", func_name, result)
+            return result
 
     async def run(self, task: str, **kwargs) -> str:
         """
@@ -79,6 +97,15 @@ class FunctionCallingAgent(Agent):
         if not self.ai_client:
             raise ValueError("ai_client is required for FunctionCallingAgent")
 
+        self._emit_hook("on_start", task)
+
+        try:
+            return await self._run_loop(task)
+        except Exception as e:
+            self._emit_hook("on_error", e)
+            raise
+
+    async def _run_loop(self, task: str) -> str:
         messages = [
             ChatMessage.system(self.system_prompt),
             ChatMessage.user(task),
@@ -93,7 +120,6 @@ class FunctionCallingAgent(Agent):
             iteration += 1
             self._log(f"Iteration {iteration}")
 
-            # 获取LLM响应
             if has_tools:
                 response = await self.ai_client.chat(
                     messages=messages,
@@ -109,7 +135,6 @@ class FunctionCallingAgent(Agent):
             assistant_msg = response.message
             messages.append(assistant_msg)
 
-            # 检查是否有工具调用
             if assistant_msg.tool_calls:
                 self._log(f"Tool calls: {len(assistant_msg.tool_calls)}")
 
@@ -117,22 +142,21 @@ class FunctionCallingAgent(Agent):
                     tool_name = tool_call.function.name
                     self._log(f"Executing: {tool_name}({tool_call.function.arguments})")
 
-                    # 执行工具
                     result = await self._execute_tool_call(tool_call)
                     self._log(f"Result: {result}")
 
-                    # 添加工具结果到消息列表
                     messages.append(ChatMessage(
                         role="tool",
                         content=result,
                         tool_call_id=tool_call.id,
                     ))
             else:
-                # 没有工具调用,直接返回答案
                 final_answer = assistant_msg.content or ""
                 self._log(f"Final Answer: {final_answer}")
+                self._emit_hook("on_finish", final_answer)
                 return final_answer
 
+        self._emit_hook("on_finish", "Error: Max iterations reached")
         return "Error: Max iterations reached"
 
     async def chat_with_tools(

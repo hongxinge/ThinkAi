@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any, AsyncIterator, Union
 import httpx
 import asyncio
+import thinkai
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from thinkai.core.models import (
@@ -47,6 +48,8 @@ class BaseProvider(ABC):
         model: Optional[str] = None,
         timeout: int = 60,
         max_retries: int = 3,
+        connection_pool_size: int = 100,
+        keepalive_connections: int = 20,
         **kwargs,
     ):
         self.api_key = api_key
@@ -54,6 +57,8 @@ class BaseProvider(ABC):
         self.model = model or self.default_model
         self.timeout = timeout
         self.max_retries = max_retries
+        self.connection_pool_size = connection_pool_size
+        self.keepalive_connections = keepalive_connections
         self.extra = kwargs
         
         # HTTP客户端
@@ -66,6 +71,11 @@ class BaseProvider(ABC):
                 base_url=self.api_base,
                 timeout=httpx.Timeout(self.timeout),
                 headers=self._get_headers(),
+                limits=httpx.Limits(
+                    max_connections=self.connection_pool_size,
+                    max_keepalive_connections=self.keepalive_connections,
+                    keepalive_expiry=30,
+                ),
             )
         return self._client
 
@@ -73,7 +83,7 @@ class BaseProvider(ABC):
         """获取请求头 - 子类可覆盖"""
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "ThinkAi/0.1.0",
+            "User-Agent": f"ThinkAi/{thinkai.__version__}",
         }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"

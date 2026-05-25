@@ -16,6 +16,7 @@ from thinkai.providers.base import BaseProvider, ProviderFactory
 from thinkai.providers.registry import registry
 from thinkai.session.manager import SessionManager
 from thinkai.middleware import MiddlewareChain
+from thinkai.middleware.retry_middleware import RetryMiddleware
 from thinkai.exceptions import ThinkAiError
 
 
@@ -194,6 +195,12 @@ class ThinkAI:
         """添加中间件"""
         self.middleware_chain.add(middleware)
 
+    def _get_retry_middleware(self) -> Optional[RetryMiddleware]:
+        for mw in self.middleware_chain.middlewares:
+            if isinstance(mw, RetryMiddleware):
+                return mw
+        return None
+
     async def chat(
         self,
         messages: Union[str, List[ChatMessage]],
@@ -204,32 +211,14 @@ class ThinkAI:
         tools: Optional[List] = None,
         **kwargs,
     ) -> ChatResponse:
-        """
-        聊天接口 - 主要调用方法
-        
-        Args:
-            messages: 消息内容(字符串或消息列表)
-            model: 模型名称/别名
-            temperature: 温度参数
-            max_tokens: 最大token数
-            session_id: 会话ID(可选)
-            tools: 工具列表(可选)
-            **kwargs: 额外参数
-            
-        Returns:
-            ChatResponse: 聊天响应
-        """
-        # 构建消息列表
         if isinstance(messages, str):
             messages = [ChatMessage.user(messages)]
-        
-        # 处理会话
+
         if session_id and self.session_manager:
             messages = await self.session_manager.add_and_get(
                 session_id, messages
             )
-        
-        # 构建请求
+
         request = ChatRequest(
             model=model or self.default_model,
             messages=messages,
@@ -238,33 +227,40 @@ class ThinkAI:
             tools=tools,
             **kwargs,
         )
-        
-        # 应用中间件
+
         if self.middleware_chain.has_middlewares():
             request = await self.middleware_chain.process_request(request)
-        
-        # 获取Provider并调用
+
         provider = self._get_provider(request.model)
-        
-        try:
-            response = await provider.chat(request)
-            
-            # 应用中间件处理响应
-            if self.middleware_chain.has_middlewares():
-                response = await self.middleware_chain.process_response(response)
-            
-            # 保存会话
-            if session_id and self.session_manager and response.choices:
-                await self.session_manager.add_assistant_message(
-                    session_id,
-                    response.content,
-                )
-            
-            return response
-        except Exception as e:
-            if self.middleware_chain.has_middlewares():
-                await self.middleware_chain.process_error(e)
-            raise
+        retry_mw = self._get_retry_middleware()
+        max_attempts = (retry_mw.max_retries + 1) if retry_mw else 1
+        last_error: Optional[Exception] = None
+
+        for attempt in range(max_attempts):
+            try:
+                response = await provider.chat(request)
+
+                if self.middleware_chain.has_middlewares():
+                    response = await self.middleware_chain.process_response(response)
+
+                if session_id and self.session_manager and response.choices:
+                    await self.session_manager.add_assistant_message(
+                        session_id,
+                        response.content,
+                    )
+
+                return response
+            except Exception as e:
+                last_error = e
+                if self.middleware_chain.has_middlewares():
+                    await self.middleware_chain.process_error(e)
+                if retry_mw and retry_mw.is_retryable(e) and attempt < max_attempts - 1:
+                    delay = retry_mw.get_delay(attempt)
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+
+        raise last_error
 
     async def chat_stream(
         self,

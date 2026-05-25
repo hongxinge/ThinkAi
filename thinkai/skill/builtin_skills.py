@@ -321,15 +321,25 @@ class SystemSkill(BaseSkillMixin):
     name = "system"
     description = "System and file operations"
 
+    def __init__(self, allowed_env_prefixes: Optional[List[str]] = None, allowed_dirs: Optional[List[str]] = None):
+        self.allowed_env_prefixes = allowed_env_prefixes or ["THINKAI_", "APP_", "PATH"]
+        self.allowed_dirs = [os.path.abspath(d) for d in (allowed_dirs or ["."])]
+
     def get_tools(self) -> List[Tool]:
+        allowed_env_prefixes = self.allowed_env_prefixes
+        allowed_dirs = self.allowed_dirs
+
         def list_directory(path: str = ".") -> str:
             """List contents of a directory.
 
             Args:
-                path: Directory path to list
+                path: Directory path to list (must be within allowed directories)
             """
             try:
-                p = Path(path)
+                abs_path = os.path.abspath(path)
+                if not any(abs_path.startswith(d) for d in allowed_dirs):
+                    return json.dumps({"error": f"Access denied. Path '{path}' is outside allowed directories."})
+                p = Path(abs_path)
                 items = []
                 for item in p.iterdir():
                     item_type = "dir" if item.is_dir() else "file"
@@ -362,8 +372,10 @@ class SystemSkill(BaseSkillMixin):
             """Get an environment variable.
 
             Args:
-                name: Variable name
+                name: Variable name (must start with an allowed prefix)
             """
+            if not any(name.startswith(prefix) for prefix in allowed_env_prefixes):
+                return json.dumps({"error": f"Access denied. Variable '{name}' does not match any allowed prefix."})
             value = os.environ.get(name)
             if value is None:
                 return json.dumps({"error": f"Variable '{name}' not found"})

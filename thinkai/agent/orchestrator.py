@@ -5,6 +5,8 @@ import asyncio
 import json
 from datetime import datetime
 
+from pydantic import BaseModel, Field
+
 from thinkai.agent.base import Agent
 from thinkai.agent.function_calling import FunctionCallingAgent
 from thinkai.core.client import ThinkAI
@@ -29,44 +31,22 @@ class AgentRole(str, Enum):
     SPECIALIST = "specialist"    # 专家
 
 
-class Task:
+class Task(BaseModel):
     """协作任务"""
 
-    def __init__(
-        self,
-        task_id: str,
-        description: str,
-        assigned_to: str = "",
-        status: TaskStatus = TaskStatus.PENDING,
-        result: Optional[str] = None,
-        error: Optional[str] = None,
-        priority: int = 0,
-        metadata: Optional[Dict[str, Any]] = None,
-    ):
-        self.task_id = task_id
-        self.description = description
-        self.assigned_to = assigned_to
-        self.status = status
-        self.result = result
-        self.error = error
-        self.priority = priority
-        self.metadata = metadata or {}
-        self.created_at = datetime.now()
-        self.completed_at = None
+    task_id: str
+    description: str
+    assigned_to: str = ""
+    status: TaskStatus = TaskStatus.PENDING
+    result: Optional[str] = None
+    error: Optional[str] = None
+    priority: int = 0
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.now)
+    completed_at: Optional[datetime] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "task_id": self.task_id,
-            "description": self.description,
-            "assigned_to": self.assigned_to,
-            "status": self.status.value,
-            "result": self.result,
-            "error": self.error,
-            "priority": self.priority,
-            "metadata": self.metadata,
-            "created_at": self.created_at.isoformat(),
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
-        }
+        return self.model_dump(mode="json")
 
 
 class AgentNode:
@@ -144,7 +124,6 @@ class MultiAgentOrchestrator:
         self.max_parallel_tasks = max_parallel_tasks
         self.system_prompt = system_prompt or "You are a coordinator that manages multiple agents to complete complex tasks."
 
-        # 创建协调者 Agent
         self.coordinator: Optional[FunctionCallingAgent] = None
 
     def add_agent(
@@ -212,7 +191,6 @@ class MultiAgentOrchestrator:
             if isinstance(task, str):
                 task = Task(task_id=f"task_{i}", description=task)
 
-            # 选择 Agent
             if agent_order and i < len(agent_order):
                 agent_name = agent_order[i]
             else:
@@ -227,7 +205,6 @@ class MultiAgentOrchestrator:
                 results[task.task_id] = f"Agent '{agent_name}' not found"
                 continue
 
-            # 如果任务依赖前一个结果,更新描述
             if previous_result and "{previous_result}" in task.description:
                 task.description = task.description.replace("{previous_result}", previous_result)
 
@@ -259,7 +236,6 @@ class MultiAgentOrchestrator:
         """
         results = {}
 
-        # 创建异步任务
         async def execute_one(task: Task, agent_name: str) -> tuple:
             agent_node = self.agents.get(agent_name)
             if not agent_node:
@@ -275,7 +251,6 @@ class MultiAgentOrchestrator:
 
             return task.task_id, result
 
-        # 分配任务到可用 Agent
         coroutines = []
         available_agents = self.get_available_agents()
         if not available_agents:
@@ -288,7 +263,6 @@ class MultiAgentOrchestrator:
             agent_name = available_agents[i % len(available_agents)]
             coroutines.append(execute_one(task, agent_name))
 
-        # 并行执行
         task_results = await asyncio.gather(*coroutines)
         for task_id, result in task_results:
             results[task_id] = result
@@ -314,7 +288,6 @@ class MultiAgentOrchestrator:
         if not self.coordinator:
             return {"error": "Coordinator not available"}
 
-        # 协调者分解任务
         available_agents_info = json.dumps([
             {"name": name, "capabilities": node.capabilities}
             for name, node in self.agents.items()
@@ -347,7 +320,6 @@ Only output valid JSON, no other text.
         except Exception:
             subtasks = [{"agent": list(self.agents.keys())[0], "task": task}]
 
-        # 执行子任务
         results = {}
         task_results_cache = []
 
@@ -355,7 +327,6 @@ Only output valid JSON, no other text.
             agent_name = subtask.get("agent", "")
             task_desc = subtask.get("task", "")
 
-            # 替换依赖结果
             for cache in task_results_cache:
                 task_desc = task_desc.replace(f"{{{cache['index']}}}", cache["result"])
 
@@ -374,7 +345,6 @@ Only output valid JSON, no other text.
             results[f"subtask_{i}"] = result
             task_results_cache.append({"index": i, "result": result})
 
-        # 协调者汇总结果
         summary_prompt = f"""
 Please summarize the results of all subtasks:
 

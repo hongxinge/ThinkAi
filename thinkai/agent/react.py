@@ -1,5 +1,5 @@
 """ReAct Agent - 推理+行动循环"""
-from typing import Optional, List, Dict, Any
+from typing import Callable, Dict, Optional, List, Any
 import json
 import re
 from thinkai.core.client import ThinkAI
@@ -28,6 +28,11 @@ class ReActAgent(Agent):
         max_iterations: int = 10,
         verbose: bool = False,
         ai_client: Optional[ThinkAI] = None,
+        on_start: Optional[Callable[[str], None]] = None,
+        on_tool_call: Optional[Callable[[str, Dict], None]] = None,
+        on_tool_result: Optional[Callable[[str, str], None]] = None,
+        on_finish: Optional[Callable[[str], None]] = None,
+        on_error: Optional[Callable[[Exception], None]] = None,
     ):
         super().__init__(
             name=name,
@@ -36,6 +41,11 @@ class ReActAgent(Agent):
             max_iterations=max_iterations,
             verbose=verbose,
             ai_client=ai_client,
+            on_start=on_start,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
+            on_finish=on_finish,
+            on_error=on_error,
         )
 
     async def run(self, task: str, **kwargs) -> str:
@@ -51,11 +61,18 @@ class ReActAgent(Agent):
         """
         if not self.ai_client:
             raise ValueError("ai_client is required for ReActAgent")
-        
-        # 构建工具描述
+
+        self._emit_hook("on_start", task)
+
+        try:
+            return await self._run_loop(task)
+        except Exception as e:
+            self._emit_hook("on_error", e)
+            raise
+
+    async def _run_loop(self, task: str) -> str:
         tools_desc = self._format_tools()
-        
-        # 构建系统提示
+
         system_prompt = f"""You are a helpful AI assistant that can use tools to complete tasks.
 
 Available tools:
@@ -79,44 +96,43 @@ Remember to think step by step and use tools when needed."""
             ChatMessage.system(system_prompt),
             ChatMessage.user(task),
         ]
-        
+
         iteration = 0
-        
+
         while iteration < self.max_iterations:
             iteration += 1
             self._log(f"Iteration {iteration}")
-            
-            # 获取LLM响应
+
             response = await self.ai_client.chat(
                 messages=messages,
                 model=self.model,
             )
-            
+
             content = response.content or ""
             messages.append(ChatMessage.assistant(content))
-            
+
             self._log(f"Response: {content}")
-            
-            # 检查是否有Final Answer
+
             if "Final Answer:" in content:
                 final_answer = content.split("Final Answer:")[-1].strip()
                 self._log(f"Final Answer: {final_answer}")
+                self._emit_hook("on_finish", final_answer)
                 return final_answer
-            
-            # 解析Action
+
             action_match = re.search(r"Action:\s*(\w+)", content)
             action_input_match = re.search(r"Action Input:\s*(.+)", content, re.DOTALL)
-            
+
             if action_match and action_input_match:
                 tool_name = action_match.group(1)
                 try:
                     tool_input = json.loads(action_input_match.group(1).strip())
                 except json.JSONDecodeError:
                     tool_input = {"input": action_input_match.group(1).strip()}
-                
+
                 self._log(f"Calling tool: {tool_name} with {tool_input}")
-                
-                # 执行工具
+
+                self._emit_hook("on_tool_call", tool_name, tool_input)
+
                 tool = self.get_tool(tool_name)
                 if not tool:
                     observation = f"Error: Tool '{tool_name}' not found"
@@ -126,14 +142,16 @@ Remember to think step by step and use tools when needed."""
                         observation = str(result)
                     except Exception as e:
                         observation = f"Error: {str(e)}"
-                
+
+                self._emit_hook("on_tool_result", tool_name, observation)
                 self._log(f"Observation: {observation}")
-                
+
                 messages.append(ChatMessage.user(f"Observation: {observation}"))
             else:
-                # 没有Action,直接返回
+                self._emit_hook("on_finish", content)
                 return content
-        
+
+        self._emit_hook("on_finish", "Error: Max iterations reached")
         return "Error: Max iterations reached"
 
     def _format_tools(self) -> str:

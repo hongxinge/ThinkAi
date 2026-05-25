@@ -2,56 +2,41 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import json
+import uuid
 import os
 from pathlib import Path
+from pydantic import BaseModel, Field
 
 
-class MemoryItem:
+class MemoryItem(BaseModel):
     """记忆项"""
 
-    def __init__(
-        self,
-        content: str,
-        memory_type: str = "fact",
-        importance: float = 0.5,
-        timestamp: Optional[datetime] = None,
-        source: str = "conversation",
-        tags: Optional[List[str]] = None,
-    ):
-        self.content = content
-        self.memory_type = memory_type  # fact, preference, experience, context
-        self.importance = importance  # 0.0-1.0
-        self.timestamp = timestamp or datetime.now()
-        self.source = source
-        self.tags = tags or []
-        self.access_count = 0
-        self.last_accessed = self.timestamp
+    id: str = ""
+    content: str
+    memory_type: str = "fact"
+    importance: float = 0.5
+    timestamp: datetime = Field(default_factory=datetime.now)
+    source: str = "conversation"
+    tags: List[str] = Field(default_factory=list)
+    access_count: int = 0
+    last_accessed: datetime = Field(default_factory=datetime.now)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "content": self.content,
-            "memory_type": self.memory_type,
-            "importance": self.importance,
-            "timestamp": self.timestamp.isoformat(),
-            "source": self.source,
-            "tags": self.tags,
-            "access_count": self.access_count,
-            "last_accessed": self.last_accessed.isoformat(),
-        }
+        return self.model_dump(mode="json")
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MemoryItem":
-        item = cls(
+        return cls(
+            id=data.get("id", ""),
             content=data["content"],
             memory_type=data.get("memory_type", "fact"),
             importance=data.get("importance", 0.5),
             timestamp=datetime.fromisoformat(data["timestamp"]),
             source=data.get("source", "conversation"),
             tags=data.get("tags", []),
+            access_count=data.get("access_count", 0),
+            last_accessed=datetime.fromisoformat(data["last_accessed"]),
         )
-        item.access_count = data.get("access_count", 0)
-        item.last_accessed = datetime.fromisoformat(data["last_accessed"])
-        return item
 
     def __repr__(self) -> str:
         return f"MemoryItem(content='{self.content[:50]}...', type={self.memory_type}, importance={self.importance})"
@@ -86,6 +71,7 @@ class FileMemoryStore(MemoryStore):
         self.base_path = Path(base_path)
         self.base_path.mkdir(parents=True, exist_ok=True)
         self._memories: Dict[str, MemoryItem] = {}
+        self._dirty: bool = False
         self._load()
 
     def _load(self):
@@ -96,7 +82,9 @@ class FileMemoryStore(MemoryStore):
                 data = json.load(f)
                 for item_data in data:
                     memory = MemoryItem.from_dict(item_data)
-                    self._memories[memory.content[:32] + str(memory.timestamp.timestamp())] = memory
+                    if not memory.id:
+                        memory.id = uuid.uuid4().hex
+                    self._memories[memory.id] = memory
 
     def _save_to_file(self):
         """保存到文件"""
@@ -104,11 +92,13 @@ class FileMemoryStore(MemoryStore):
         data = [m.to_dict() for m in self._memories.values()]
         with open(memory_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        self._dirty = False
 
     async def save(self, memory: MemoryItem) -> str:
-        memory_id = memory.content[:32] + str(memory.timestamp.timestamp())
+        memory_id = uuid.uuid4().hex
+        memory.id = memory_id
         self._memories[memory_id] = memory
-        self._save_to_file()
+        self._dirty = True
         return memory_id
 
     async def get(self, memory_id: str) -> Optional[MemoryItem]:
@@ -124,6 +114,7 @@ class FileMemoryStore(MemoryStore):
         for m in results[:limit]:
             m.access_count += 1
             m.last_accessed = datetime.now()
+        self._dirty = True
         return results[:limit]
 
     async def list_by_type(self, memory_type: str, limit: int = 50) -> List[MemoryItem]:
@@ -134,13 +125,18 @@ class FileMemoryStore(MemoryStore):
     async def delete(self, memory_id: str) -> bool:
         if memory_id in self._memories:
             del self._memories[memory_id]
-            self._save_to_file()
+            self._dirty = True
             return True
         return False
 
     async def clear(self) -> None:
         self._memories.clear()
-        self._save_to_file()
+        self._dirty = True
+
+    def flush(self) -> None:
+        """将脏数据显式写入磁盘"""
+        if self._dirty:
+            self._save_to_file()
 
 
 class MemoryManager:
@@ -172,7 +168,7 @@ class MemoryManager:
             memory_type=memory_type,
             importance=importance,
             source=source,
-            tags=tags,
+            tags=tags or [],
         )
         memory_id = await self.store.save(memory)
         await self._cleanup_if_needed()
@@ -204,8 +200,7 @@ class MemoryManager:
 
         deleted = 0
         for memory in to_delete:
-            memory_id = memory.content[:32] + str(memory.timestamp.timestamp())
-            if await self.store.delete(memory_id):
+            if memory.id and await self.store.delete(memory.id):
                 deleted += 1
 
         return deleted
@@ -238,8 +233,8 @@ class MemoryManager:
             all_memories.sort(key=lambda m: m.importance + m.access_count * 0.2)
             excess = all_memories[:len(all_memories) - self.max_memories]
             for memory in excess:
-                memory_id = memory.content[:32] + str(memory.timestamp.timestamp())
-                await self.store.delete(memory_id)
+                if memory.id:
+                    await self.store.delete(memory.id)
 
     async def get_stats(self) -> Dict[str, Any]:
         """获取记忆统计信息"""

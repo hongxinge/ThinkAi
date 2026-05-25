@@ -1,6 +1,6 @@
 """Agent基类"""
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any
+from typing import Callable, Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 
 from thinkai.core.client import ThinkAI
@@ -29,6 +29,11 @@ class Agent(ABC):
         max_iterations: int = 10,
         verbose: bool = False,
         ai_client: Optional[ThinkAI] = None,
+        on_start: Optional[Callable[[str], None]] = None,
+        on_tool_call: Optional[Callable[[str, Dict], None]] = None,
+        on_tool_result: Optional[Callable[[str, str], None]] = None,
+        on_finish: Optional[Callable[[str], None]] = None,
+        on_error: Optional[Callable[[Exception], None]] = None,
         **kwargs,
     ):
         self.name = name
@@ -39,7 +44,12 @@ class Agent(ABC):
         self.ai_client = ai_client
         self.extra = kwargs
 
-        # 注册工具
+        self.on_start = on_start
+        self.on_tool_call = on_tool_call
+        self.on_tool_result = on_tool_result
+        self.on_finish = on_finish
+        self.on_error = on_error
+
         self._tool_registry: Dict[str, Tool] = {}
         for tool in self.tools:
             self._tool_registry[tool.name] = tool
@@ -81,3 +91,12 @@ class Agent(ABC):
         """日志输出"""
         if self.verbose:
             print(f"[{self.name}] {message}")
+
+    def _emit_hook(self, name: str, *args):
+        """安全调用生命周期钩子"""
+        hook = getattr(self, name, None)
+        if hook is not None:
+            try:
+                hook(*args)
+            except Exception:
+                pass
