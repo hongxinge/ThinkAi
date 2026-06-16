@@ -1,7 +1,8 @@
 """OpenAI兼容Provider - 统一处理所有兼容OpenAI API的模型"""
 from typing import AsyncIterator, Dict, Any
-import httpx
-import json
+
+from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from thinkai.providers.base import BaseProvider
 from thinkai.providers.registry import register_provider
@@ -13,15 +14,21 @@ from thinkai.core.models import (
     ChatChoice,
     StreamChoice,
     Usage,
+    ToolCall,
+    FunctionCall,
 )
-from thinkai.exceptions import APIError
+from thinkai.exceptions import (
+    APIError,
+    APIConnectionError,
+    AuthenticationError,
+    RateLimitError,
+)
 
 
 @register_provider("openai-compatible")
 class OpenAICompatibleProvider(BaseProvider):
-    """
-    OpenAI兼容Provider - 统一处理所有兼容OpenAI API格式的模型
-    
+    """OpenAI兼容Provider - 统一处理所有兼容OpenAI API格式的模型
+
     支持的模型(通过配置预设):
     - DeepSeek: deepseek-chat, deepseek-coder
     - 通义千问: qwen-turbo, qwen-plus, qwen-max
@@ -34,8 +41,7 @@ class OpenAICompatibleProvider(BaseProvider):
     """
 
     name = "openai-compatible"
-    
-    # Provider预设配置 - 开箱即用
+
     PRESETS: Dict[str, Dict[str, Any]] = {
         "openai": {
             "api_base": "https://api.openai.com/v1",
@@ -83,12 +89,11 @@ class OpenAICompatibleProvider(BaseProvider):
         provider_preset: str = None,
         **kwargs,
     ):
-        # 如果指定了provider预设名称,自动加载配置
         if provider_preset and provider_preset in self.PRESETS:
             preset = self.PRESETS[provider_preset]
             api_base = api_base or preset["api_base"]
             model = model or preset["default_model"]
-        
+
         super().__init__(
             api_key=api_key,
             api_base=api_base,
@@ -96,80 +101,139 @@ class OpenAICompatibleProvider(BaseProvider):
             **kwargs,
         )
 
+        self._async_client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.api_base,
+            timeout=float(self.timeout),
+            max_retries=0,
+        )
+
     async def chat(self, request: ChatRequest) -> ChatResponse:
-        """聊天接口"""
-        client = await self._get_client()
         payload = self._build_chat_request_payload(request)
-        
-        response = await client.post("/chat/completions", json=payload)
-        
-        if response.status_code != 200:
-            await self._handle_api_error(response)
-        
-        data = response.json()
-        return self._parse_response(data)
+        payload.pop("stream", None)
+
+        try:
+            completion: ChatCompletion = await self._async_client.chat.completions.create(
+                **payload,
+            )
+        except Exception as exc:
+            self._map_sdk_exception(exc)
+
+        return self._convert_chat_response(completion)
 
     async def chat_stream(self, request: ChatRequest) -> AsyncIterator[StreamChunk]:
-        """流式聊天接口"""
-        client = await self._get_client()
         payload = self._build_chat_request_payload(request)
         payload["stream"] = True
-        
-        async with client.stream("POST", "/chat/completions", json=payload) as response:
-            if response.status_code != 200:
-                await self._handle_api_error(response)
-            
-            async for line in response.aiter_lines():
-                if not line.strip():
-                    continue
-                
-                if line.startswith("data: "):
-                    data_str = line[6:]
-                    
-                    if data_str.strip() == "[DONE]":
-                        break
-                    
-                    try:
-                        data = json.loads(data_str)
-                        yield self._parse_stream_chunk(data)
-                    except json.JSONDecodeError:
-                        continue
 
-    def _parse_response(self, data: Dict[str, Any]) -> ChatResponse:
-        """解析OpenAI格式响应"""
-        return ChatResponse(
-            id=data.get("id", ""),
-            model=data.get("model", self.model),
-            choices=[
+        try:
+            stream = await self._async_client.chat.completions.create(**payload)
+            async for chunk in stream:
+                yield self._convert_stream_chunk(chunk)
+        except Exception as exc:
+            self._map_sdk_exception(exc)
+
+    def _convert_chat_response(self, completion: ChatCompletion) -> ChatResponse:
+        choices = []
+        for choice in completion.choices:
+            msg = choice.message
+            tool_calls = None
+            if msg.tool_calls:
+                tool_calls = [
+                    ToolCall(
+                        id=tc.id,
+                        type=tc.type or "function",
+                        function=FunctionCall(
+                            name=tc.function.name,
+                            arguments=tc.function.arguments,
+                        ),
+                    )
+                    for tc in msg.tool_calls
+                ]
+            choices.append(
                 ChatChoice(
-                    index=choice.get("index", 0),
+                    index=choice.index,
                     message=ChatMessage(
-                        role=choice["message"]["role"],
-                        content=choice["message"].get("content"),
+                        role=msg.role,
+                        content=msg.content,
+                        tool_calls=tool_calls,
                     ),
-                    finish_reason=choice.get("finish_reason"),
+                    finish_reason=choice.finish_reason,
                 )
-                for choice in data.get("choices", [])
-            ],
-            usage=Usage.from_dict(data.get("usage", {})),
+            )
+
+        usage = None
+        if completion.usage:
+            usage = Usage(
+                prompt_tokens=completion.usage.prompt_tokens,
+                completion_tokens=completion.usage.completion_tokens,
+                total_tokens=completion.usage.total_tokens,
+            )
+
+        return ChatResponse(
+            id=completion.id,
+            model=completion.model or self.model,
+            choices=choices,
+            usage=usage,
         )
 
-    def _parse_stream_chunk(self, data: Dict[str, Any]) -> StreamChunk:
-        """解析流式响应块"""
-        choice_data = data.get("choices", [{}])[0]
-        delta = choice_data.get("delta", {})
-        
+    def _convert_stream_chunk(self, chunk: ChatCompletionChunk) -> StreamChunk:
+        if not chunk.choices:
+            return StreamChunk(
+                id=chunk.id or "",
+                model=chunk.model or self.model,
+                choices=[],
+            )
+
+        choice_data = chunk.choices[0]
+        delta = choice_data.delta
+
+        tool_calls = None
+        if delta.tool_calls:
+            tool_calls = [
+                ToolCall(
+                    id=tc.id or "",
+                    type=tc.type or "function",
+                    function=FunctionCall(
+                        name=tc.function.name or "",
+                        arguments=tc.function.arguments or "",
+                    ),
+                )
+                for tc in delta.tool_calls
+            ]
+
         return StreamChunk(
-            id=data.get("id", ""),
-            model=data.get("model", self.model),
+            id=chunk.id or "",
+            model=chunk.model or self.model,
             choices=[
                 StreamChoice(
-                    index=choice_data.get("index", 0),
+                    index=choice_data.index,
                     delta=ChatMessage(
-                        role=delta.get("role", "assistant"),
-                        content=delta.get("content"),
+                        role=delta.role or "assistant",
+                        content=delta.content,
+                        tool_calls=tool_calls,
                     ),
-                    finish_reason=choice_data.get("finish_reason"),
+                    finish_reason=choice_data.finish_reason,
                 )
             ],
         )
+
+    def _map_sdk_exception(self, exc: Exception) -> None:
+        import openai
+
+        if isinstance(exc, openai.AuthenticationError):
+            raise AuthenticationError(self.name) from exc
+        if isinstance(exc, openai.RateLimitError):
+            raise RateLimitError(self.name) from exc
+        if isinstance(exc, openai.APIConnectionError):
+            raise APIConnectionError(str(exc), self.name) from exc
+        if isinstance(exc, openai.APIStatusError):
+            raise APIError(str(exc), self.name, exc.status_code) from exc
+        if isinstance(exc, openai.APIError):
+            raise APIError(str(exc), self.name) from exc
+
+        raise
+
+    async def close(self):
+        if self._async_client is not None:
+            await self._async_client.close()
+        await super().close()

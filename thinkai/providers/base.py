@@ -4,8 +4,6 @@ from typing import Optional, List, Dict, Any, AsyncIterator, Union
 import httpx
 import asyncio
 import thinkai
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-
 from thinkai.core.models import (
     ChatRequest,
     ChatResponse,
@@ -63,20 +61,22 @@ class BaseProvider(ABC):
         
         # HTTP客户端
         self._client: Optional[httpx.AsyncClient] = None
+        self._client_lock: asyncio.Lock = asyncio.Lock()
 
     async def _get_client(self) -> httpx.AsyncClient:
         """获取HTTP客户端(单例模式)"""
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                base_url=self.api_base,
-                timeout=httpx.Timeout(self.timeout),
-                headers=self._get_headers(),
-                limits=httpx.Limits(
-                    max_connections=self.connection_pool_size,
-                    max_keepalive_connections=self.keepalive_connections,
-                    keepalive_expiry=30,
-                ),
-            )
+        async with self._client_lock:
+            if self._client is None or self._client.is_closed:
+                self._client = httpx.AsyncClient(
+                    base_url=self.api_base,
+                    timeout=httpx.Timeout(self.timeout, read=300),
+                    headers=self._get_headers(),
+                    limits=httpx.Limits(
+                        max_connections=self.connection_pool_size,
+                        max_keepalive_connections=self.keepalive_connections,
+                        keepalive_expiry=30,
+                    ),
+                )
         return self._client
 
     def _get_headers(self) -> Dict[str, str]:
@@ -149,7 +149,7 @@ class BaseProvider(ABC):
             **kwargs,
         )
         
-        return await self.execute_with_retry(self.chat, request)
+        return await self.chat(request)
 
     async def complete_stream(
         self,
@@ -173,23 +173,6 @@ class BaseProvider(ABC):
         
         async for chunk in self.chat_stream(request):
             yield chunk
-
-    async def execute_with_retry(self, func, *args, **kwargs):
-        """带重试的执行"""
-        last_error = None
-        
-        for attempt in range(self.max_retries):
-            try:
-                return await func(*args, **kwargs)
-            except (APIConnectionError, RateLimitError) as e:
-                last_error = e
-                if attempt < self.max_retries - 1:
-                    wait_time = 2 ** attempt
-                    await asyncio.sleep(wait_time)
-            except Exception as e:
-                raise
-        
-        raise last_error
 
     def _build_chat_request_payload(
         self,
@@ -273,11 +256,13 @@ class BaseProvider(ABC):
             raise RateLimitError(self.name, int(retry_after) if retry_after else None)
         elif response.status_code >= 400:
             error_msg = response.text
-            try:
-                error_data = response.json()
-                error_msg = error_data.get("error", {}).get("message", error_msg)
-            except:
-                pass
+            content_type = response.headers.get("Content-Type", "")
+            if "application/json" in content_type:
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("error", {}).get("message", error_msg)
+                except Exception:
+                    pass
             
             if response.status_code >= 500:
                 raise APIConnectionError(error_msg, self.name)

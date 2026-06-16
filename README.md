@@ -14,6 +14,7 @@
 ## 特性
 
 - **轻量零依赖** - 核心框架不依赖任何Web框架,完全脱离FastAPI
+- **OpenAI SDK底层** - OpenAI及兼容Provider使用官方OpenAI Python SDK作为底层传输层,稳定可靠
 - **多模型支持** - 支持Ollama、OpenAI、通义千问、DeepSeek、Claude、Gemini等主流大模型
 - **统一接口** - 一次配置,多模型自由切换
 - **开箱即用** - 简单配置即可使用,无需复杂配置

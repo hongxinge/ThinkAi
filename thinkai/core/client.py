@@ -78,7 +78,9 @@ class ThinkAI:
         
         # Provider实例缓存
         self._providers: Dict[str, BaseProvider] = {}
+        self._provider_access_time: Dict[str, float] = {}
         self._main_provider: Optional[BaseProvider] = None
+        self._provider_max_idle: int = 300
         
         # 会话管理
         self.session_manager: Optional[SessionManager] = None
@@ -114,15 +116,6 @@ class ThinkAI:
         )
 
     def _get_provider(self, model: Optional[str] = None) -> BaseProvider:
-        """
-        获取Provider实例
-        
-        Args:
-            model: 模型名称或别名
-            
-        Returns:
-            Provider实例
-        """
         if not model or model == self.default_model:
             return self._main_provider
         
@@ -131,17 +124,42 @@ class ThinkAI:
         
         # 检查是否已缓存
         if model in self._providers:
+            self._provider_access_time[model] = asyncio.get_event_loop().time()
             return self._providers[model]
+
+        # 回收闲置Provider
+        self._schedule_eviction()
         
         # 从配置创建
         if model in self.config.models:
             model_config = self.config.models[model]
             provider = ProviderFactory.create_from_config(model_config)
             self._providers[model] = provider
+            self._provider_access_time[model] = asyncio.get_event_loop().time()
             return provider
         
         # 使用默认Provider
         return self._main_provider
+
+    async def _evict_idle_providers(self):
+        now = asyncio.get_event_loop().time()
+        idle_keys = [
+            k for k, t in self._provider_access_time.items()
+            if now - t > self._provider_max_idle
+        ]
+        for k in idle_keys:
+            provider = self._providers.pop(k, None)
+            self._provider_access_time.pop(k, None)
+            if provider:
+                await provider.close()
+
+    def _schedule_eviction(self):
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(self._evict_idle_providers())
+        except RuntimeError:
+            pass
 
     def register_provider(
         self,

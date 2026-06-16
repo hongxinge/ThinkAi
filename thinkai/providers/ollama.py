@@ -1,7 +1,9 @@
 """Ollama Provider - 本地大模型支持"""
+import logging
 from typing import AsyncIterator, Optional, Dict, Any
 import httpx
 import json
+import uuid
 
 from thinkai.providers.base import BaseProvider
 from thinkai.providers.registry import register_provider
@@ -12,8 +14,12 @@ from thinkai.core.models import (
     StreamChunk,
     StreamChoice,
     Usage,
+    ChatChoice,
 )
 from thinkai.exceptions import APIError
+
+
+logger = logging.getLogger(__name__)
 
 
 @register_provider("ollama")
@@ -33,11 +39,10 @@ class OllamaProvider(BaseProvider):
             self.api_base = self.default_api_base
 
     def _get_headers(self) -> Dict[str, str]:
-        """Ollama不需要认证"""
-        return {
-            "Content-Type": "application/json",
-            "User-Agent": "ThinkAi/0.1.0",
-        }
+        """Ollama不需要认证，使用基类动态版本"""
+        headers = super()._get_headers()
+        headers.pop("Authorization", None)
+        return headers
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
         """聊天接口"""
@@ -90,21 +95,21 @@ class OllamaProvider(BaseProvider):
             }
         }
         
-        import uuid
-        chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
-        
+        chunk_id = f"chatcmpl-{uuid.uuid4().hex}"
+
         async with client.stream("POST", "/api/chat", json=payload) as response:
             if response.status_code != 200:
                 await self._handle_api_error(response)
-            
+
             async for line in response.aiter_lines():
                 if not line.strip():
                     continue
-                
+
                 try:
                     data = json.loads(line)
                     yield self._parse_stream_chunk(data, chunk_id)
                 except json.JSONDecodeError:
+                    logger.warning("Ollama stream received invalid JSON line: %s", line[:200])
                     continue
 
     def _parse_response(self, data: Dict[str, Any]) -> ChatResponse:
@@ -112,7 +117,7 @@ class OllamaProvider(BaseProvider):
         message_data = data.get("message", {})
         
         return ChatResponse(
-            id=f"chatcmpl-{hash(data.get('created_at', ''))}",
+            id=f"chatcmpl-{uuid.uuid4().hex}",
             model=data.get("model", self.model),
             choices=[
                 ChatChoice(

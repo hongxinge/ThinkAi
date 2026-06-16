@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "thinkai-framework"
-version = "0.6.0"
+version = "0.7.0"
 description = "Enterprise-grade AI framework for seamless LLM integration"
 readme = "README.md"
 license = "MIT"
@@ -30,7 +30,7 @@ dependencies = [
     "httpx>=0.24.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
-    "tenacity>=8.0.0",
+    "openai>=1.0.0",
 ]
 
 [project.optional-dependencies]

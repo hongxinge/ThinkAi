@@ -38,3 +38,5 @@ Thumbs.db
 # Distribution
 *.tar.gz
 *.whl
+
+AGENTS.md

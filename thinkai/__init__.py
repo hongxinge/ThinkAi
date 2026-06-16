@@ -4,7 +4,7 @@ ThinkAi - Enterprise-grade AI Framework
 开箱即用,支持多模型,RAG,Agent,Skill,Memory等核心能力
 """
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 __author__ = "ThinkAi Team"
 
 from thinkai.core.client import ThinkAI
