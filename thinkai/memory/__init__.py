@@ -39,7 +39,8 @@ class MemoryItem(BaseModel):
         )
 
     def __repr__(self) -> str:
-        return f"MemoryItem(content='{self.content[:50]}...', type={self.memory_type}, importance={self.importance})"
+        preview = self.content[:50] + ("..." if len(self.content) > 50 else "")
+        return f"MemoryItem(content='{preview}', type={self.memory_type}, importance={self.importance})"
 
 
 class MemoryStore:
@@ -94,11 +95,18 @@ class FileMemoryStore(MemoryStore):
             json.dump(data, f, ensure_ascii=False, indent=2)
         self._dirty = False
 
+    def _persist(self) -> None:
+        """立即落盘(写穿透)。失败时保留脏标记,等待下次重试或显式flush()"""
+        try:
+            self._save_to_file()
+        except OSError:
+            self._dirty = True
+
     async def save(self, memory: MemoryItem) -> str:
         memory_id = uuid.uuid4().hex
         memory.id = memory_id
         self._memories[memory_id] = memory
-        self._dirty = True
+        self._persist()
         return memory_id
 
     async def get(self, memory_id: str) -> Optional[MemoryItem]:
@@ -114,7 +122,7 @@ class FileMemoryStore(MemoryStore):
         for m in results[:limit]:
             m.access_count += 1
             m.last_accessed = datetime.now()
-        self._dirty = True
+        self._persist()
         return results[:limit]
 
     async def list_by_type(self, memory_type: str, limit: int = 50) -> List[MemoryItem]:
@@ -125,16 +133,16 @@ class FileMemoryStore(MemoryStore):
     async def delete(self, memory_id: str) -> bool:
         if memory_id in self._memories:
             del self._memories[memory_id]
-            self._dirty = True
+            self._persist()
             return True
         return False
 
     async def clear(self) -> None:
         self._memories.clear()
-        self._dirty = True
+        self._persist()
 
     def flush(self) -> None:
-        """将脏数据显式写入磁盘"""
+        """将脏数据显式写入磁盘(写穿透模式下通常无需手动调用,保留用于兜底)"""
         if self._dirty:
             self._save_to_file()
 

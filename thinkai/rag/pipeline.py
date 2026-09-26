@@ -27,10 +27,10 @@ class RAGPipeline:
     def __init__(
         self,
         documents: Optional[Union[str, List[str]]] = None,
-        chunk_size: int = 500,
-        chunk_overlap: int = 50,
-        top_k: int = 5,
-        embedding_model: str = "nomic-embed-text",
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
+        top_k: Optional[int] = None,
+        embedding_model: Optional[str] = None,
         embedding_provider: str = "simple",
         vector_store: str = "chroma",
         vector_store_path: str = "./thinkai_data/vectors",
@@ -39,10 +39,11 @@ class RAGPipeline:
         embedding: Optional[BaseEmbedding] = None,
     ):
         self.config = config or RAGConfig()
-        self.chunk_size = chunk_size or self.config.chunk_size
-        self.chunk_overlap = chunk_overlap or self.config.chunk_overlap
-        self.top_k = top_k or self.config.top_k
-        self.embedding_model = embedding_model or self.config.embedding_model
+        # 未显式传入时回落到配置值(None判断保证0等合法值不被误覆盖)
+        self.chunk_size = chunk_size if chunk_size is not None else self.config.chunk_size
+        self.chunk_overlap = chunk_overlap if chunk_overlap is not None else self.config.chunk_overlap
+        self.top_k = top_k if top_k is not None else self.config.top_k
+        self.embedding_model = embedding_model if embedding_model is not None else self.config.embedding_model
         self.embedding_provider = embedding_provider
         self.ai_client = ai_client
 
@@ -68,7 +69,12 @@ class RAGPipeline:
     def _init_vector_store(self, store_type: str, path: str) -> BaseVectorStore:
         if store_type == "chroma":
             return ChromaStore(persist_path=path)
-        return ChromaStore(persist_path=path)
+        elif store_type == "memory":
+            from thinkai.rag.vector_store import InMemoryVectorStore
+            return InMemoryVectorStore()
+        raise ValueError(
+            f"不支持的向量存储类型: {store_type}, 可选: chroma, memory"
+        )
 
     def _init_embedding(self) -> BaseEmbedding:
         if self.ai_client and hasattr(self.ai_client, 'default_provider'):
@@ -147,7 +153,7 @@ class RAGPipeline:
         if not self.indexed:
             return []
 
-        k = top_k or self.top_k
+        k = top_k if top_k is not None else self.top_k
         query_embedding = await self.embedding.embed_text(query)
         results = await self.vector_store.search(query_embedding, k)
         return results

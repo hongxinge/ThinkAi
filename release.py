@@ -141,10 +141,10 @@ def main():
     
     if test_mode:
         print("\n测试安装命令:")
-        print("  pip install --index-url https://test.pypi.org/simple/ thinkai")
+        print("  pip install --index-url https://test.pypi.org/simple/ thinkai-framework")
     else:
         print("\n安装命令:")
-        print("  pip install thinkai")
+        print("  pip install thinkai-framework")
     
     print("\n注意:")
     print("  1. 发布后可能需要几分钟才能在PyPI上显示")

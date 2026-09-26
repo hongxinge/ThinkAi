@@ -8,7 +8,11 @@ from thinkai.providers.registry import register_provider
 from thinkai.core.models import (
     ChatRequest,
     ChatResponse,
+    ChatMessage,
     StreamChunk,
+    StreamChoice,
+    Usage,
+    ChatChoice,
 )
 from thinkai.exceptions import APIError
 
@@ -51,6 +55,8 @@ class DeepSeekProvider(BaseProvider):
         
         async with client.stream("POST", "/chat/completions", json=payload) as response:
             if response.status_code != 200:
+                # 流式响应必须先aread()才能读取错误内容
+                await response.aread()
                 await self._handle_api_error(response)
             
             async for line in response.aiter_lines():

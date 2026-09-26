@@ -3,6 +3,7 @@ from typing import AsyncIterator, Dict, Any
 import httpx
 import json
 
+import thinkai
 from thinkai.providers.base import BaseProvider
 from thinkai.providers.registry import register_provider
 from thinkai.core.models import (
@@ -21,7 +22,7 @@ from thinkai.exceptions import APIError
 class ClaudeProvider(BaseProvider):
     """
     Anthropic Claude Provider
-    
+
     API文档: https://docs.anthropic.com/claude/reference/messages_post
     """
 
@@ -33,7 +34,7 @@ class ClaudeProvider(BaseProvider):
         """Claude API使用x-api-key认证"""
         return {
             "Content-Type": "application/json",
-            "User-Agent": "ThinkAi/0.1.0",
+            "User-Agent": f"ThinkAi/{thinkai.__version__}",
             "x-api-key": self.api_key,
             "anthropic-version": "2023-06-01",
         }
@@ -59,6 +60,8 @@ class ClaudeProvider(BaseProvider):
 
         async with client.stream("POST", "/messages", json=payload) as response:
             if response.status_code != 200:
+                # 流式响应必须先aread()才能读取错误内容
+                await response.aread()
                 await self._handle_api_error(response)
 
             async for line in response.aiter_lines():

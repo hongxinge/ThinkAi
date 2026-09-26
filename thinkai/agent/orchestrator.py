@@ -284,6 +284,9 @@ class MultiAgentOrchestrator:
         Returns:
             任务结果字典
         """
+        if not self.agents:
+            return {"error": "No agents registered. Please add agents before running hierarchical mode."}
+
         self._create_coordinator()
         if not self.coordinator:
             return {"error": "Coordinator not available"}

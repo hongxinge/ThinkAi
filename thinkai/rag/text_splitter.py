@@ -17,22 +17,24 @@ class CharacterSplitter(TextSplitter):
     """按字符分割"""
 
     def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50):
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
+        # 参数校验,防止 overlap >= size 导致分割死循环
+        self.chunk_size = max(1, chunk_size)
+        self.chunk_overlap = max(0, min(chunk_overlap, self.chunk_size - 1))
 
     def split(self, text: str) -> List[str]:
         if len(text) <= self.chunk_size:
             return [text]
-        
+
         chunks = []
         start = 0
-        
+
         while start < len(text):
             end = start + self.chunk_size
             chunk = text[start:end]
             chunks.append(chunk)
-            start = end - self.chunk_overlap
-        
+            # 保证每次至少前进1个字符,避免极端参数下死循环
+            start = max(end - self.chunk_overlap, start + 1)
+
         return chunks
 
 

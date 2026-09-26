@@ -172,7 +172,7 @@ class OpenAIProvider(BaseProvider):
         if isinstance(exc, openai.APIError):
             raise APIError(str(exc), self.name) from exc
 
-        raise
+        raise exc
 
     async def close(self):
         if self._async_client is not None:

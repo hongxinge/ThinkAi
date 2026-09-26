@@ -3,6 +3,7 @@ from typing import Optional, List, Dict, Any, Union, AsyncIterator
 from contextlib import asynccontextmanager
 import asyncio
 import json
+import time
 
 from thinkai.core.config import Settings, ModelConfig
 from thinkai.core.models import (
@@ -11,12 +12,14 @@ from thinkai.core.models import (
     ChatMessage,
     StreamChunk,
     MessageRole,
+    ChatChoice,
 )
 from thinkai.providers.base import BaseProvider, ProviderFactory
 from thinkai.providers.registry import registry
 from thinkai.session.manager import SessionManager
 from thinkai.middleware import MiddlewareChain
 from thinkai.middleware.retry_middleware import RetryMiddleware
+from thinkai.cache import CacheMiddleware
 from thinkai.exceptions import ThinkAiError
 
 
@@ -118,31 +121,31 @@ class ThinkAI:
     def _get_provider(self, model: Optional[str] = None) -> BaseProvider:
         if not model or model == self.default_model:
             return self._main_provider
-        
+
         # 检查是否是别名
         model = self._model_aliases.get(model, model)
-        
+
         # 检查是否已缓存
         if model in self._providers:
-            self._provider_access_time[model] = asyncio.get_event_loop().time()
+            self._provider_access_time[model] = time.monotonic()
             return self._providers[model]
 
         # 回收闲置Provider
         self._schedule_eviction()
-        
+
         # 从配置创建
         if model in self.config.models:
             model_config = self.config.models[model]
             provider = ProviderFactory.create_from_config(model_config)
             self._providers[model] = provider
-            self._provider_access_time[model] = asyncio.get_event_loop().time()
+            self._provider_access_time[model] = time.monotonic()
             return provider
-        
+
         # 使用默认Provider
         return self._main_provider
 
     async def _evict_idle_providers(self):
-        now = asyncio.get_event_loop().time()
+        now = time.monotonic()
         idle_keys = [
             k for k, t in self._provider_access_time.items()
             if now - t > self._provider_max_idle
@@ -155,9 +158,8 @@ class ThinkAI:
 
     def _schedule_eviction(self):
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(self._evict_idle_providers())
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._evict_idle_providers())
         except RuntimeError:
             pass
 
@@ -219,6 +221,12 @@ class ThinkAI:
                 return mw
         return None
 
+    def _get_cache_middleware(self) -> Optional[CacheMiddleware]:
+        for mw in self.middleware_chain.middlewares:
+            if isinstance(mw, CacheMiddleware):
+                return mw
+        return None
+
     async def chat(
         self,
         messages: Union[str, List[ChatMessage]],
@@ -246,20 +254,43 @@ class ThinkAI:
             **kwargs,
         )
 
-        if self.middleware_chain.has_middlewares():
-            request = await self.middleware_chain.process_request(request)
-
         provider = self._get_provider(request.model)
         retry_mw = self._get_retry_middleware()
+        cache_mw = self._get_cache_middleware()
         max_attempts = (retry_mw.max_retries + 1) if retry_mw else 1
         last_error: Optional[Exception] = None
 
         for attempt in range(max_attempts):
+            request_processed = False
             try:
+                # 中间件在每次尝试时处理请求,
+                # 确保限流信号量等资源在每次重试中对称获取/释放
+                if self.middleware_chain.has_middlewares():
+                    request = await self.middleware_chain.process_request(request)
+                request_processed = True
+
+                # 缓存命中 - 直接返回,不调用Provider
+                if cache_mw:
+                    cached = cache_mw.get_cached_response(request)
+                    if cached is not None:
+                        response = ChatResponse(**cached) if isinstance(cached, dict) else cached
+                        if self.middleware_chain.has_middlewares():
+                            response = await self.middleware_chain.process_response(response)
+                        if session_id and self.session_manager and response.choices:
+                            await self.session_manager.add_assistant_message(
+                                session_id,
+                                response.content,
+                            )
+                        return response
+
                 response = await provider.chat(request)
 
                 if self.middleware_chain.has_middlewares():
                     response = await self.middleware_chain.process_response(response)
+
+                # 响应写入缓存
+                if cache_mw:
+                    await cache_mw.store_response(request, response)
 
                 if session_id and self.session_manager and response.choices:
                     await self.session_manager.add_assistant_message(
@@ -270,8 +301,13 @@ class ThinkAI:
                 return response
             except Exception as e:
                 last_error = e
-                if self.middleware_chain.has_middlewares():
-                    await self.middleware_chain.process_error(e)
+                # 仅在process_request完成后才通知中间件错误,
+                # 避免中间件释放从未获取的资源
+                if request_processed and self.middleware_chain.has_middlewares():
+                    try:
+                        await self.middleware_chain.process_error(e)
+                    except Exception:
+                        pass  # 中间件自身的异常不应掩盖原始异常
                 if retry_mw and retry_mw.is_retryable(e) and attempt < max_attempts - 1:
                     delay = retry_mw.get_delay(attempt)
                     await asyncio.sleep(delay)
@@ -286,24 +322,31 @@ class ThinkAI:
         model: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        session_id: Optional[str] = None,
         **kwargs,
     ) -> AsyncIterator[StreamChunk]:
         """
         流式聊天接口
-        
+
         Args:
             messages: 消息内容
             model: 模型名称/别名
             temperature: 温度参数
             max_tokens: 最大token数
+            session_id: 会话ID,传入后自动维护多轮对话历史
             **kwargs: 额外参数
-            
+
         Returns:
             AsyncIterator[StreamChunk]: 流式响应迭代器
         """
         if isinstance(messages, str):
             messages = [ChatMessage.user(messages)]
-        
+
+        if session_id and self.session_manager:
+            messages = await self.session_manager.add_and_get(
+                session_id, messages
+            )
+
         request = ChatRequest(
             model=model or self.default_model,
             messages=messages,
@@ -312,11 +355,58 @@ class ThinkAI:
             stream=True,
             **kwargs,
         )
-        
+
+        if self.middleware_chain.has_middlewares():
+            request = await self.middleware_chain.process_request(request)
+
         provider = self._get_provider(request.model)
-        
-        async for chunk in provider.chat_stream(request):
-            yield chunk
+        collected_content: List[str] = []
+
+        try:
+            async for chunk in provider.chat_stream(request):
+                if chunk.choices and chunk.choices[0].delta.content:
+                    collected_content.append(chunk.choices[0].delta.content)
+                yield chunk
+
+            # 流式完成 - 保存会话历史并通知中间件响应完成
+            if session_id and self.session_manager and collected_content:
+                await self.session_manager.add_assistant_message(
+                    session_id,
+                    "".join(collected_content),
+                )
+
+            if self.middleware_chain.has_middlewares():
+                final_response = ChatResponse(
+                    id="",
+                    model=request.model or self.default_model,
+                    choices=[
+                        ChatChoice(
+                            index=0,
+                            message=ChatMessage.assistant("".join(collected_content)),
+                            finish_reason="stop",
+                        )
+                    ],
+                )
+                await self.middleware_chain.process_response(final_response)
+        except Exception as e:
+            if self.middleware_chain.has_middlewares():
+                try:
+                    await self.middleware_chain.process_error(e)
+                except Exception:
+                    pass  # 中间件自身的异常不应掩盖原始异常
+            raise
+        except BaseException as be:
+            # 消费者提前中断(GeneratorExit/CancelledError) - 释放限流等中间件资源
+            if self.middleware_chain.has_middlewares():
+                try:
+                    error = (
+                        be if isinstance(be, Exception)
+                        else ThinkAiError(f"流式响应被提前中断: {type(be).__name__}")
+                    )
+                    await self.middleware_chain.process_error(error)
+                except Exception:
+                    pass
+            raise
 
     async def complete(
         self,
@@ -350,17 +440,31 @@ class ThinkAI:
 
     async def switch_provider(self, provider: str, model: Optional[str] = None):
         """
-        切换Provider
-        
+        切换Provider - 重建主Provider实例使其真正生效
+
         Args:
             provider: 新Provider名称
-            model: 新模型名称(可选)
+            model: 新模型名称(可选,不传则沿用当前模型)
         """
         self.default_provider = provider
         if model:
             self.default_model = model
-        
-        self._main_provider = self._get_provider(model)
+
+        old_provider = self._main_provider
+        self._main_provider = None
+        try:
+            self._init_main_provider()
+        except Exception:
+            # 切换失败时回滚,保持原Provider可用
+            self._main_provider = old_provider
+            raise
+
+        # 关闭旧Provider,避免连接泄漏
+        if old_provider and old_provider is not self._main_provider:
+            try:
+                await old_provider.close()
+            except Exception:
+                pass
 
     @asynccontextmanager
     async def session(self, session_id: Optional[str] = None):

@@ -28,8 +28,8 @@
 - **记忆系统** - 长期记忆、跨会话记忆、自动遗忘、重要性衰减
 - **多Agent协作** - Sequential/Parallel/Hierarchical三种协作模式
 - **MCP支持** - 轻量级Model Context Protocol客户端
-- **中间件管道** - 日志、重试(真正有效),可扩展
-- **缓存层** - LRU内存缓存/文件缓存,减少重复API调用
+- **中间件管道** - 日志、重试、限流、缓存四件套,真正接入请求链路
+- **缓存层** - LRU内存缓存/文件缓存,相同请求直接命中,省Token省钱
 - **结构化输出** - Pydantic模型约束LLM输出,自动JSON解析与验证
 - **速率限制** - Token Bucket限流 + 并发控制,企业级流量管理
 - **追踪可观测** - TraceSpan链路追踪,Console/JSON导出
@@ -427,7 +427,7 @@ thinkai/
 │   ├── cli.py          # CLI命令行工具
 │   ├── streaming.py    # 流式处理
 │   └── exceptions.py   # 异常定义
-├── tests/              # 测试(223个测试用例)
+├── tests/              # 测试(262个测试用例)
 ├── pyproject.toml      # 项目配置
 └── README.md
 ```
@@ -732,7 +732,45 @@ prompt = prompt_manager.format("test_generation", language="Python", code="def a
 
 ## 文档
 
-完整文档请访问: [https://thinkai.readthedocs.io](https://thinkai.readthedocs.io)
+- 快速上手: [QUICKSTART.md](QUICKSTART.md)
+- 配置参考: [config.example.yaml](config.example.yaml)
+- 发布指引: [RELEASE_GUIDE.md](RELEASE_GUIDE.md)
+
+## 版本历史
+
+### v0.7.1 (2026-09-26) - 稳定性大版本: 21项缺陷修复
+
+经全面代码审计,确认并修复21个影响生产使用的缺陷,并新增39个回归测试(总计262个,全部通过):
+
+**高危修复**
+- 限流x重试组合: 修复信号量不对称获取/释放导致的限流失效
+- 缓存中间件: 从未生效 -> 完整接入chat请求链路,相同请求直接返回缓存
+- Provider切换: `switch_provider()` 之前不生效,现在真正重建并关闭旧连接
+- 会话历史裁剪: system消息数达到上限时返回全部消息(裁剪失效)
+- 记忆持久化: `FileMemoryStore` 只标脏不落盘,程序退出记忆丢失
+
+**中危修复**
+- 代码沙箱: 同步exec阻塞事件循环且无超时 -> 独立线程+可配置超时,print输出纳入返回值
+- 文件路径安全: 修复 `/dataevil` 绕过 `/data` 的前缀攻击,改用commonpath严格校验
+- MCP客户端: 补齐initialize握手/响应按id匹配/请求超时/stderr排空,兼容严格MCP Server
+- 会话Redis存储: 补齐代码实现(原引用不存在的模块),未配置时给出友好提示
+- 空Agent层级编排: IndexError -> 友好错误信息
+- 流式接口: 补齐会话支持与中间件对称调用,5个Provider流式错误路径修复ResponseNotRead
+
+**低危修复**
+- `chat_stream()` 支持 `session_id` 参数,与 `chat()` 能力对齐
+- 文本分割器: 修复 `chunk_overlap >= chunk_size` 时死循环,参数自动校验
+- RAG参数: 传0值误回落配置默认值(`or`->`is None`),新增零依赖InMemoryVectorStore
+- Provider插件安装: 类型检查矛盾导致必失败,已修复
+- FileCache序列化: 枚举类型JSON序列化失败(`model_dump(mode="json")`)
+- API载荷: 过滤缓存内部标记,不污染上游API请求
+- 429重试: HTTP日期格式Retry-After不再抛异常,自动忽略
+- SDK异常映射: 裸`raise`重构为显式`raise exc`,脱离上下文调用不再报错
+- 修复Qwen/DeepSeek缺失导入、Qwen死代码连接泄漏、Claude/Gemini硬编码版本号
+
+### v0.7.0
+
+- 功能基线版本,详见仓库提交历史
 
 ## 贡献
 

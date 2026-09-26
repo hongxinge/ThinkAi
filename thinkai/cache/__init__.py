@@ -167,7 +167,8 @@ class CacheMiddleware(BaseMiddleware):
         cache_key = request.extra.get("_cache_key")
         if cache_key is None or request.stream:
             return
-        await self.cache.set(cache_key, response.model_dump(), ttl=self.ttl)
+        # mode="json" 确保枚举/日期等类型可被FileCache JSON序列化
+        await self.cache.set(cache_key, response.model_dump(mode="json"), ttl=self.ttl)
 
     @staticmethod
     def get_cached_response(request: ChatRequest) -> Optional[Dict[str, Any]]:

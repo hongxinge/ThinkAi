@@ -11,6 +11,14 @@ from thinkai.agent.function_calling import FunctionCallingAgent
 from thinkai.core.client import ThinkAI
 
 
+def _is_path_within(path: str, directory: str) -> bool:
+    """判断path是否严格位于directory内(防止前缀绕过,如/dataevil绕过/data)"""
+    try:
+        return os.path.commonpath([path, directory]) == directory
+    except ValueError:
+        return False
+
+
 class BaseSkillMixin:
     """Skill mixin - 为独立 Skill 类提供通用能力"""
 
@@ -323,7 +331,8 @@ class SystemSkill(BaseSkillMixin):
 
     def __init__(self, allowed_env_prefixes: Optional[List[str]] = None, allowed_dirs: Optional[List[str]] = None):
         self.allowed_env_prefixes = allowed_env_prefixes or ["THINKAI_", "APP_", "PATH"]
-        self.allowed_dirs = [os.path.abspath(d) for d in (allowed_dirs or ["."])]
+        # normcase统一大小写(Windows不区分大小写),防止大小写绕过
+        self.allowed_dirs = [os.path.normcase(os.path.abspath(d)) for d in (allowed_dirs or ["."])]
 
     def get_tools(self) -> List[Tool]:
         allowed_env_prefixes = self.allowed_env_prefixes
@@ -336,8 +345,8 @@ class SystemSkill(BaseSkillMixin):
                 path: Directory path to list (must be within allowed directories)
             """
             try:
-                abs_path = os.path.abspath(path)
-                if not any(abs_path.startswith(d) for d in allowed_dirs):
+                abs_path = os.path.normcase(os.path.abspath(path))
+                if not any(_is_path_within(abs_path, d) for d in allowed_dirs):
                     return json.dumps({"error": f"Access denied. Path '{path}' is outside allowed directories."})
                 p = Path(abs_path)
                 items = []

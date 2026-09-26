@@ -83,7 +83,7 @@ class OllamaProvider(BaseProvider):
     async def chat_stream(self, request: ChatRequest) -> AsyncIterator[StreamChunk]:
         """流式聊天接口"""
         client = await self._get_client()
-        
+
         payload = {
             "model": request.model or self.model,
             "messages": [msg.to_dict() for msg in request.messages],
@@ -94,11 +94,26 @@ class OllamaProvider(BaseProvider):
                 "num_predict": request.max_tokens or -1,
             }
         }
-        
+
+        if request.tools:
+            payload["tools"] = [
+                {
+                    "type": tool.type,
+                    "function": {
+                        "name": tool.function.name,
+                        "description": tool.function.description,
+                        "parameters": tool.function.parameters,
+                    }
+                }
+                for tool in request.tools
+            ]
+
         chunk_id = f"chatcmpl-{uuid.uuid4().hex}"
 
         async with client.stream("POST", "/api/chat", json=payload) as response:
             if response.status_code != 200:
+                # 流式响应必须先aread()才能读取错误内容
+                await response.aread()
                 await self._handle_api_error(response)
 
             async for line in response.aiter_lines():

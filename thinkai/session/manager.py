@@ -25,30 +25,38 @@ class SessionManager:
         else:
             return MemoryStorage()
 
+    def _trim_history(self, messages: List[ChatMessage]) -> List[ChatMessage]:
+        """裁剪历史长度 - 始终保留system消息与最近的消息"""
+        max_history = self.config.max_history
+        if max_history <= 0 or len(messages) <= max_history:
+            return messages
+
+        system_messages = [m for m in messages if m.role == MessageRole.SYSTEM]
+        other_messages = [m for m in messages if m.role != MessageRole.SYSTEM]
+
+        keep = max_history - len(system_messages)
+        if keep <= 0:
+            # system消息数量已达上限:仅保留最近的system消息
+            return system_messages[-max_history:]
+        return system_messages + other_messages[-keep:]
+
     async def get_messages(self, session_id: str) -> List[ChatMessage]:
         """获取会话消息"""
         messages_data = await self.storage.get(session_id)
         if not messages_data:
             return []
-        
+
         return [ChatMessage(**msg) for msg in messages_data]
 
     async def add_message(self, session_id: str, message: ChatMessage):
         """添加消息"""
         if not self.config.enabled:
             return
-        
+
         messages = await self.get_messages(session_id)
         messages.append(message)
-        
-        # 限制历史长度
-        if len(messages) > self.config.max_history:
-            # 保留system消息和最近的消息
-            system_messages = [m for m in messages if m.role == MessageRole.SYSTEM]
-            other_messages = [m for m in messages if m.role != MessageRole.SYSTEM]
-            
-            messages = system_messages + other_messages[-(self.config.max_history - len(system_messages)):]
-        
+        messages = self._trim_history(messages)
+
         await self.storage.set(
             session_id,
             [m.to_dict() for m in messages],
@@ -63,19 +71,14 @@ class SessionManager:
         """添加消息并返回完整历史"""
         messages = await self.get_messages(session_id)
         messages.extend(new_messages)
-        
-        # 限制历史长度
-        if len(messages) > self.config.max_history:
-            system_messages = [m for m in messages if m.role == MessageRole.SYSTEM]
-            other_messages = [m for m in messages if m.role != MessageRole.SYSTEM]
-            messages = system_messages + other_messages[-(self.config.max_history - len(system_messages)):]
-        
+        messages = self._trim_history(messages)
+
         await self.storage.set(
             session_id,
             [m.to_dict() for m in messages],
             ttl=self.config.ttl,
         )
-        
+
         return messages
 
     async def add_assistant_message(self, session_id: str, content: str):

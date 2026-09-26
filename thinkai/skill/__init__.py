@@ -4,11 +4,28 @@ import inspect
 import ast
 import operator
 import os
+import io
+import asyncio
+import threading
+import contextlib
 
 from thinkai.agent.tool import Tool, tool
 from thinkai.agent.function_calling import FunctionCallingAgent
 from thinkai.core.client import ThinkAI
 from thinkai.skill.builtin_skills import DatabaseSkill, APISkill, ImageSkill, TextSkill, SystemSkill
+
+
+def _is_path_within(path: str, directory: str) -> bool:
+    """
+    判断path是否严格位于directory内
+
+    使用commonpath而非前缀匹配,防止"/dataevil"绕过"/data"这类前缀攻击。
+    """
+    try:
+        return os.path.commonpath([path, directory]) == directory
+    except ValueError:
+        # 不同盘符或混合绝对/相对路径等无法比较的情况,一律拒绝
+        return False
 
 
 class Skill:
@@ -129,33 +146,27 @@ class _SafeCodeValidator(ast.NodeVisitor):
 
 
 class CodeSkill(Skill):
-    """代码执行Skill - 安全沙箱执行"""
+    """代码执行Skill - 安全沙箱执行(独立线程+超时保护)"""
 
     name = "code"
     description = "Write and execute Python code in a safe sandbox"
 
-    def __init__(self, allowed_dirs: Optional[List[str]] = None, max_output_length: int = 10000):
+    def __init__(
+        self,
+        allowed_dirs: Optional[List[str]] = None,
+        max_output_length: int = 10000,
+        timeout: float = 10.0,
+    ):
         self.allowed_dirs = allowed_dirs
         self.max_output_length = max_output_length
+        self.timeout = timeout
 
     def get_tools(self) -> List[Tool]:
-        allowed_dirs = self.allowed_dirs
         max_output_length = self.max_output_length
+        timeout = self.timeout
 
-        def execute_python(code: str) -> str:
-            """Execute Python code in a safe sandbox and return the output.
-
-            The code runs in a restricted environment:
-            - No imports, file access, or system calls
-            - Only safe builtins are available
-            - Private attribute access is blocked
-
-            The last expression's value is returned as the result.
-            Use 'result = ...' to set the output explicitly.
-
-            Args:
-                code: The Python code to execute (must be safe, no imports or file access)
-            """
+        def _run_in_sandbox(code: str) -> str:
+            """在工作线程中同步执行沙箱代码(仅内部使用)"""
             try:
                 tree = ast.parse(code)
                 validator = _SafeCodeValidator()
@@ -167,22 +178,82 @@ class CodeSkill(Skill):
                 local_vars = {}
 
                 compiled = compile(tree, "<sandbox>", "exec")
-                exec(compiled, safe_globals, local_vars)
+                stdout_capture = io.StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    exec(compiled, safe_globals, local_vars)
 
+                stdout_output = stdout_capture.getvalue().rstrip("\n")
+                explicit_result = "result" in local_vars or "_" in local_vars
                 result = local_vars.get("result", local_vars.get("_", "Code executed successfully"))
                 result_str = str(result)
-                if len(result_str) > max_output_length:
-                    result_str = result_str[:max_output_length] + "...(truncated)"
-                return result_str
+
+                if stdout_output and explicit_result:
+                    combined = f"{stdout_output}\n{result_str}"
+                elif stdout_output:
+                    combined = stdout_output
+                else:
+                    combined = result_str
+
+                if len(combined) > max_output_length:
+                    combined = combined[:max_output_length] + "...(truncated)"
+                return combined
             except SyntaxError as e:
                 return f"SyntaxError: {e}"
             except Exception as e:
                 return f"Error: {type(e).__name__}: {e}"
 
+        async def execute_python(code: str) -> str:
+            """Execute Python code in a safe sandbox and return the output.
+
+            The code runs in a restricted environment:
+            - No imports, file access, or system calls
+            - Only safe builtins are available
+            - Private attribute access is blocked
+            - Runs in a separate thread with a timeout (default 10s)
+
+            The last expression's value is returned as the result.
+            Use 'result = ...' to set the output explicitly.
+            Output from print() is captured and included in the result.
+
+            Args:
+                code: The Python code to execute (must be safe, no imports or file access)
+            """
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
+
+            def _worker():
+                try:
+                    result = _run_in_sandbox(code)
+                except BaseException as exc:
+                    try:
+                        if not future.cancelled():
+                            future.set_exception(exc)
+                    except asyncio.InvalidStateError:
+                        pass
+                    return
+                try:
+                    if not future.cancelled():
+                        future.set_result(result)
+                except asyncio.InvalidStateError:
+                    pass
+
+            # 独立守护线程执行,超时后放弃等待,不阻塞事件循环
+            thread = threading.Thread(
+                target=_worker, daemon=True, name="thinkai-sandbox"
+            )
+            thread.start()
+            try:
+                return await asyncio.wait_for(future, timeout=timeout)
+            except asyncio.TimeoutError:
+                return (
+                    f"TimeoutError: 代码执行超过 {timeout} 秒被强制中止。"
+                    "请检查代码中是否存在死循环或长时间阻塞操作。"
+                )
+
         return [
             Tool(
                 name="execute_python",
-                description="Execute Python code in a safe sandbox (no imports, file access, or system calls)",
+                description="Execute Python code in a safe sandbox (no imports, file access, or system calls; 10s timeout)",
                 func=execute_python,
             ),
         ]
@@ -268,11 +339,14 @@ class FileSkill(Skill):
     description = "Read and write files within allowed directories"
 
     def __init__(self, allowed_dirs: Optional[List[str]] = None):
-        self.allowed_dirs = [os.path.abspath(d) for d in (allowed_dirs or ["."])]
+        # normcase统一大小写(Windows不区分大小写),防止大小写绕过
+        self.allowed_dirs = [
+            os.path.normcase(os.path.abspath(d)) for d in (allowed_dirs or ["."])
+        ]
 
     def _is_path_allowed(self, file_path: str) -> bool:
-        abs_path = os.path.abspath(file_path)
-        return any(abs_path.startswith(d) for d in self.allowed_dirs)
+        abs_path = os.path.normcase(os.path.abspath(file_path))
+        return any(_is_path_within(abs_path, d) for d in self.allowed_dirs)
 
     def get_tools(self) -> List[Tool]:
         allowed_dirs = self.allowed_dirs
@@ -284,8 +358,8 @@ class FileSkill(Skill):
                 file_path: Path to the file to read (must be within allowed directories)
             """
             try:
-                abs_path = os.path.abspath(file_path)
-                if not any(abs_path.startswith(d) for d in allowed_dirs):
+                abs_path = os.path.normcase(os.path.abspath(file_path))
+                if not any(_is_path_within(abs_path, d) for d in allowed_dirs):
                     return f"Error: Access denied. Path '{file_path}' is outside allowed directories."
                 with open(abs_path, "r", encoding="utf-8") as f:
                     return f.read()
@@ -300,8 +374,8 @@ class FileSkill(Skill):
                 content: The content to write
             """
             try:
-                abs_path = os.path.abspath(file_path)
-                if not any(abs_path.startswith(d) for d in allowed_dirs):
+                abs_path = os.path.normcase(os.path.abspath(file_path))
+                if not any(_is_path_within(abs_path, d) for d in allowed_dirs):
                     return f"Error: Access denied. Path '{file_path}' is outside allowed directories."
                 with open(abs_path, "w", encoding="utf-8") as f:
                     f.write(content)

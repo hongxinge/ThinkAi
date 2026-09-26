@@ -235,9 +235,9 @@ async for chunk in ai.chat_stream("讲一个故事"):
 - 查看 [README.md](README.md) 了解完整功能
 - 查看 [examples/](examples/) 目录中的示例代码
 - 查看 [RELEASE_GUIDE.md](RELEASE_GUIDE.md) 了解如何发布到PyPI
-- 访问文档: https://thinkai.readthedocs.io
 
 ## 获取帮助
 
-- Issue: https://github.com/thinkai/thinkai/issues
-- 文档: https://thinkai.readthedocs.io
+- Gitee仓库: https://gitee.com/hongxinge/think-ai
+- GitHub仓库: https://github.com/hongxinge/ThinkAi
+- Issue反馈: https://github.com/hongxinge/ThinkAi/issues

@@ -3,6 +3,7 @@ from typing import AsyncIterator, Dict, Any
 import httpx
 import json
 
+import thinkai
 from thinkai.providers.base import BaseProvider
 from thinkai.providers.registry import register_provider
 from thinkai.core.models import (
@@ -21,7 +22,7 @@ from thinkai.exceptions import APIError
 class GeminiProvider(BaseProvider):
     """
     Google Gemini Provider
-    
+
     API文档: https://ai.google.dev/gemini-api/docs
     """
 
@@ -33,7 +34,7 @@ class GeminiProvider(BaseProvider):
         """Gemini API请求头"""
         return {
             "Content-Type": "application/json",
-            "User-Agent": "ThinkAi/0.1.0",
+            "User-Agent": f"ThinkAi/{thinkai.__version__}",
         }
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
@@ -62,6 +63,8 @@ class GeminiProvider(BaseProvider):
 
         async with client.stream("POST", endpoint, json=payload) as response:
             if response.status_code != 200:
+                # 流式响应必须先aread()才能读取错误内容
+                await response.aread()
                 await self._handle_api_error(response)
 
             buffer = ""

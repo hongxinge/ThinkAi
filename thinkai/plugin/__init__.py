@@ -175,21 +175,24 @@ class PluginManager:
         """
         将插件作为Provider安装到ProviderRegistry
 
+        load()返回的是插件类的实例,注册表中注册的是实例对应的类。
+
         Args:
             plugin_name: 已注册的插件名称
             registry: ProviderRegistry实例
 
         Returns:
-            加载的Provider类
+            加载的Provider实例
         """
         from thinkai.providers.base import BaseProvider
 
         instance = self.load(plugin_name)
-        if not isinstance(instance, type) or not issubclass(instance, BaseProvider):
+        if not isinstance(instance, BaseProvider):
             raise TypeError(
-                f"Plugin '{plugin_name}' is not a BaseProvider subclass, got {type(instance).__name__}"
+                f"Plugin '{plugin_name}' is not a BaseProvider instance, got {type(instance).__name__}"
             )
-        registry.register(plugin_name, instance)
+        provider_class = type(instance)
+        registry.register(plugin_name, provider_class)
         logger.info("Installed plugin '%s' as Provider", plugin_name)
         return instance
 

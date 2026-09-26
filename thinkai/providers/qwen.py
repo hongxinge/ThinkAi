@@ -8,7 +8,11 @@ from thinkai.providers.registry import register_provider
 from thinkai.core.models import (
     ChatRequest,
     ChatResponse,
+    ChatMessage,
     StreamChunk,
+    StreamChoice,
+    Usage,
+    ChatChoice,
 )
 from thinkai.exceptions import APIError
 
@@ -28,26 +32,17 @@ class QwenProvider(BaseProvider):
         super().__init__(**kwargs)
         if not self.api_base:
             self.api_base = self.default_api_base
-        # OpenAI兼容格式,复用OpenAI的实现
-        from thinkai.providers.openai import OpenAIProvider
-        self._delegate = OpenAIProvider(
-            api_key=self.api_key,
-            api_base=self.api_base,
-            model=self.model,
-            timeout=self.timeout,
-            max_retries=self.max_retries,
-        )
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
         """聊天接口"""
         client = await self._get_client()
         payload = self._build_chat_request_payload(request)
-        
+
         response = await client.post("/chat/completions", json=payload)
-        
+
         if response.status_code != 200:
             await self._handle_api_error(response)
-        
+
         data = response.json()
         return self._parse_response(data)
 
@@ -56,9 +51,11 @@ class QwenProvider(BaseProvider):
         client = await self._get_client()
         payload = self._build_chat_request_payload(request)
         payload["stream"] = True
-        
+
         async with client.stream("POST", "/chat/completions", json=payload) as response:
             if response.status_code != 200:
+                # 流式响应必须先aread()才能读取错误内容
+                await response.aread()
                 await self._handle_api_error(response)
             
             async for line in response.aiter_lines():

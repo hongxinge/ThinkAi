@@ -202,9 +202,12 @@ class BaseProvider(ABC):
             payload["tools"] = [tool.model_dump() for tool in request.tools]
         if request.tool_choice:
             payload["tool_choice"] = request.tool_choice
-        
-        payload.update(request.extra)
-        
+
+        # 过滤内部标记字段(下划线开头,如缓存标记),避免污染API载荷
+        payload.update({
+            k: v for k, v in request.extra.items() if not k.startswith("_")
+        })
+
         return payload
 
     def _parse_response(self, response_data: Dict[str, Any]) -> ChatResponse:
@@ -253,7 +256,14 @@ class BaseProvider(ABC):
             raise AuthenticationError(self.name)
         elif response.status_code == 429:
             retry_after = response.headers.get("Retry-After")
-            raise RateLimitError(self.name, int(retry_after) if retry_after else None)
+            retry_after_seconds = None
+            if retry_after:
+                try:
+                    retry_after_seconds = int(retry_after)
+                except (TypeError, ValueError):
+                    # HTTP日期格式(如"Fri, 31 Dec 2026 23:59:59 GMT")不支持,忽略
+                    retry_after_seconds = None
+            raise RateLimitError(self.name, retry_after_seconds)
         elif response.status_code >= 400:
             error_msg = response.text
             content_type = response.headers.get("Content-Type", "")

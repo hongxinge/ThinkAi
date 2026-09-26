@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "thinkai-framework"
-version = "0.7.0"
+version = "0.7.1"
 description = "Enterprise-grade AI framework for seamless LLM integration"
 readme = "README.md"
 license = "MIT"
@@ -60,10 +60,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/thinkai/thinkai"
-Documentation = "https://thinkai.readthedocs.io"
-Repository = "https://github.com/thinkai/thinkai"
-Issues = "https://github.com/thinkai/thinkai/issues"
+Homepage = "https://github.com/hongxinge/ThinkAi"
+Documentation = "https://github.com/hongxinge/ThinkAi#readme"
+Repository = "https://github.com/hongxinge/ThinkAi"
+Issues = "https://github.com/hongxinge/ThinkAi/issues"
 
 [project.scripts]
 thinkai = "thinkai.cli:main"
