@@ -1,5 +1,7 @@
 # ThinkAi 快速开始指南
 
+> 当前版本: **v0.7.1** | 安装最新版: `pip install thinkai-framework --upgrade`
+
 ## 环境要求
 
 - Python 3.9+ (你的版本: Python 3.13.13 ✓)

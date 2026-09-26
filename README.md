@@ -2,10 +2,16 @@
 
 基于Python异步的企业级AI大模型集成框架 - **开箱即用,简单易用,功能全面**
 
+> **当前版本: v0.7.1**（2026-09-26 稳定性大版本,21项缺陷修复,262个测试全部通过）
+> 安装最新版: `pip install thinkai-framework --upgrade`
+> 更新详情见 [版本历史](#版本历史)
+
 [![Gitee](https://img.shields.io/badge/Gitee-ThinkAi-red)](https://gitee.com/hongxinge/think-ai)
 [![GitHub](https://img.shields.io/badge/GitHub-ThinkAi-black)](https://github.com/hongxinge/ThinkAi)
-[![PyPI](https://img.shields.io/pypi/v/thinkai-framework)](https://pypi.org/project/thinkai-framework/)
+[![PyPI Version](https://img.shields.io/pypi/v/thinkai-framework)](https://pypi.org/project/thinkai-framework/)
+[![Python Version](https://img.shields.io/badge/Python-3.9%2B-blue)](https://pypi.org/project/thinkai-framework/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-262%20passed-brightgreen)](tests/)
 
 - 🏠 Gitee: https://gitee.com/hongxinge/think-ai
 - 🌐 GitHub: https://github.com/hongxinge/ThinkAi
