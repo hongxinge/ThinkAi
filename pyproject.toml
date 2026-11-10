@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "thinkai-framework"
-version = "0.7.1"
+version = "0.8.0"
 description = "Enterprise-grade AI framework for seamless LLM integration"
 readme = "README.md"
 license = "MIT"
@@ -34,19 +34,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-web = ["fastapi>=0.100.0"]
-ollama = ["ollama>=0.1.0"]
+# Ollama / Qwen / Claude / Gemini 均通过 httpx 或 OpenAI 兼容层实现，
+# 不依赖各家官方 SDK，故不再声明这些未经使用的依赖。
+web = ["fastapi>=0.100.0", "uvicorn>=0.20.0"]
 openai = ["openai>=1.0.0"]
-qwen = ["dashscope>=1.0.0"]
 deepseek = ["openai>=1.0.0"]
-claude = ["anthropic>=0.7.0"]
-gemini = ["google-generativeai>=0.3.0"]
 rag = [
     "chromadb>=0.4.0",
-    "tiktoken>=0.5.0",
     "pypdf>=3.0",
-    "python-docx>=0.8.0",
 ]
+session = ["redis>=4.2"]
+image = ["Pillow>=9.0"]
 agent = ["openai>=1.0.0"]
 dev = [
     "pytest>=7.0",
@@ -54,9 +52,12 @@ dev = [
     "black>=23.0",
     "ruff>=0.1.0",
     "mypy>=1.0",
+    "redis>=4.2",
+    "build>=1.0",
+    "twine>=4.0",
 ]
 all = [
-    "thinkai[web,ollama,openai,qwen,deepseek,claude,gemini,rag,agent]",
+    "thinkai[web,openai,deepseek,rag,session,image,agent]",
 ]
 
 [project.urls]
@@ -85,3 +86,7 @@ python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"

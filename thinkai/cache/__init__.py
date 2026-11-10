@@ -140,10 +140,38 @@ class CacheMiddleware(BaseMiddleware):
 
     @staticmethod
     def _make_cache_key(request: ChatRequest) -> str:
+        """生成缓存键。
+
+        必须覆盖所有会改变模型响应的请求字段；下划线开头的 extra 键属于
+        框架内部标记（缓存键、命中标记等），不能参与哈希，否则同一请求在
+        写入标记后会产生不同键，缓存永远无法命中。
+        """
+        extra = {
+            k: v for k, v in request.extra.items() if not k.startswith("_")
+        }
+        tools_data = None
+        if request.tools:
+            tools_data = [
+                t.model_dump(mode="json") if hasattr(t, "model_dump") else t
+                for t in request.tools
+            ]
         parts = [
             request.model,
-            json.dumps([m.to_dict() for m in request.messages], sort_keys=True, ensure_ascii=False),
+            json.dumps(
+                [m.to_dict() for m in request.messages],
+                sort_keys=True, ensure_ascii=False,
+            ),
             str(request.temperature),
+            str(request.top_p),
+            str(request.max_tokens),
+            str(request.n),
+            json.dumps(request.stop, sort_keys=True, ensure_ascii=False),
+            str(request.presence_penalty),
+            str(request.frequency_penalty),
+            json.dumps(tools_data, sort_keys=True, ensure_ascii=False, default=str),
+            json.dumps(request.tool_choice, sort_keys=True, ensure_ascii=False),
+            json.dumps(request.user, sort_keys=True, ensure_ascii=False),
+            json.dumps(extra, sort_keys=True, ensure_ascii=False, default=str),
         ]
         raw = "|".join(parts)
         return hashlib.sha256(raw.encode()).hexdigest()

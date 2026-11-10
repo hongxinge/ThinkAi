@@ -217,6 +217,7 @@ class MultiAgentOrchestrator:
             task.completed_at = datetime.now()
 
             results[task.task_id] = result
+            self.task_results[task.task_id] = result
             previous_result = result
 
         return results
@@ -235,6 +236,8 @@ class MultiAgentOrchestrator:
             任务结果字典
         """
         results = {}
+        # 旧实现直接 gather 全部协程，max_parallel_tasks 从未生效
+        semaphore = asyncio.Semaphore(max(1, self.max_parallel_tasks))
 
         async def execute_one(task: Task, agent_name: str) -> tuple:
             agent_node = self.agents.get(agent_name)
@@ -244,7 +247,8 @@ class MultiAgentOrchestrator:
             task.status = TaskStatus.RUNNING
             task.assigned_to = agent_name
 
-            result = await agent_node.execute_task(task)
+            async with semaphore:
+                result = await agent_node.execute_task(task)
             task.result = result
             task.status = TaskStatus.COMPLETED
             task.completed_at = datetime.now()
@@ -266,6 +270,7 @@ class MultiAgentOrchestrator:
         task_results = await asyncio.gather(*coroutines)
         for task_id, result in task_results:
             results[task_id] = result
+            self.task_results[task_id] = result
 
         return results
 
@@ -346,6 +351,7 @@ Only output valid JSON, no other text.
             task_obj.status = TaskStatus.COMPLETED
 
             results[f"subtask_{i}"] = result
+            self.task_results[f"subtask_{i}"] = result
             task_results_cache.append({"index": i, "result": result})
 
         summary_prompt = f"""

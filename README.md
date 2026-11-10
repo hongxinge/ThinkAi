@@ -2,7 +2,7 @@
 
 基于Python异步的企业级AI大模型集成框架 - **开箱即用,简单易用,功能全面**
 
-> **当前版本: v0.7.1**（2026-09-26 稳定性大版本,21项缺陷修复,262个测试全部通过）
+> **当前版本: v0.8.0**（2026-11-10 企业级加固与易用性版本,293 个测试全部通过）
 > 安装最新版: `pip install thinkai-framework --upgrade`
 > 更新详情见 [版本历史](#版本历史)
 
@@ -10,8 +10,8 @@
 [![GitHub](https://img.shields.io/badge/GitHub-ThinkAi-black)](https://github.com/hongxinge/ThinkAi)
 [![PyPI Version](https://img.shields.io/pypi/v/thinkai-framework)](https://pypi.org/project/thinkai-framework/)
 [![Python Version](https://img.shields.io/badge/Python-3.9%2B-blue)](https://pypi.org/project/thinkai-framework/)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-262%20passed-brightgreen)](tests/)
+[![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/hongxinge/ThinkAi/blob/main/LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-293%20passed-brightgreen)](https://github.com/hongxinge/ThinkAi/tree/main/tests)
 
 - 🏠 Gitee: https://gitee.com/hongxinge/think-ai
 - 🌐 GitHub: https://github.com/hongxinge/ThinkAi
@@ -19,7 +19,7 @@
 
 ## 特性
 
-- **轻量零依赖** - 核心框架不依赖任何Web框架,完全脱离FastAPI
+- **轻量核心** - 不依赖任何Web框架,完全脱离FastAPI;核心依赖为 pydantic / httpx / openai SDK
 - **OpenAI SDK底层** - OpenAI及兼容Provider使用官方OpenAI Python SDK作为底层传输层,稳定可靠
 - **多模型支持** - 支持Ollama、OpenAI、通义千问、DeepSeek、Claude、Gemini等主流大模型
 - **统一接口** - 一次配置,多模型自由切换
@@ -28,18 +28,18 @@
 - **符合OpenAI标准** - 采用OpenAI兼容的API格式
 - **流式响应** - 支持SSE流式输出,Agent支持真正的流式Function Calling
 - **会话管理** - 内置多轮对话上下文管理
-- **RAG支持** - 内置Embedding + 向量检索,3行代码实现检索增强生成
+- **RAG支持** - 内置Embedding + 向量检索;默认零依赖内存向量库,3行代码即可使用
 - **Agent系统** - 内置ReAct Agent、Function Calling Agent、流式Function Calling Agent
 - **Skill系统** - 9大内置Skill(搜索/代码/数学/文件/数据库/API/图像/文本/系统),安全沙箱执行
 - **记忆系统** - 长期记忆、跨会话记忆、自动遗忘、重要性衰减
-- **多Agent协作** - Sequential/Parallel/Hierarchical三种协作模式
+- **多Agent协作** - Sequential/Parallel/Hierarchical三种协作模式,支持并发上限
 - **MCP支持** - 轻量级Model Context Protocol客户端
 - **中间件管道** - 日志、重试、限流、缓存四件套,真正接入请求链路
 - **缓存层** - LRU内存缓存/文件缓存,相同请求直接命中,省Token省钱
 - **结构化输出** - Pydantic模型约束LLM输出,自动JSON解析与验证
 - **速率限制** - Token Bucket限流 + 并发控制,企业级流量管理
 - **追踪可观测** - TraceSpan链路追踪,Console/JSON导出
-- **Agent状态持久化** - 保存/恢复Agent执行状态,支持断点续跑
+- **Agent状态存取** - 提供 AgentState 保存/恢复 Mixin;断点续跑需由自定义 Agent 接入执行循环
 - **插件系统** - 动态加载外部Skill/Provider/Middleware,可扩展
 - **@tool装饰器** - 一行代码创建Tool,自动推断参数Schema
 - **16种Prompt模板** - CoT/Few-Shot/翻译/代码审查/测试生成等
@@ -177,7 +177,7 @@ answer = await rag.query("ThinkAi框架支持哪些AI模型?")
 print(answer)
 ```
 
-> **Embedding说明**: 默认使用轻量级哈希Embedding(开箱即用,无需额外模型)。配置Ollama后自动使用`nomic-embed-text`模型生成高质量向量。
+> **Embedding / 向量库说明**: 默认使用零依赖的内存向量库，无需安装 chromadb（如需持久化请显式传 `vector_store="chroma"` 并安装 `.[rag]`）。Embedding 方面：未传 `ai_client` 或显式指定 `embedding_provider="simple"` 时使用零依赖哈希实现；`ai_client` 为 Ollama 时自动使用 `nomic-embed-text`；其他 Provider 默认回落哈希实现，需要语义向量时请显式传入 `embedding_provider` 与 `embedding_model`。
 
 ### 9. Function Calling Agent(函数调用智能体)
 
@@ -433,7 +433,7 @@ thinkai/
 │   ├── cli.py          # CLI命令行工具
 │   ├── streaming.py    # 流式处理
 │   └── exceptions.py   # 异常定义
-├── tests/              # 测试(262个测试用例)
+├── tests/              # 测试(293个测试用例)
 ├── pyproject.toml      # 项目配置
 └── README.md
 ```
@@ -738,11 +738,20 @@ prompt = prompt_manager.format("test_generation", language="Python", code="def a
 
 ## 文档
 
-- 快速上手: [QUICKSTART.md](QUICKSTART.md)
-- 配置参考: [config.example.yaml](config.example.yaml)
-- 发布指引: [RELEASE_GUIDE.md](RELEASE_GUIDE.md)
+- 快速上手: [QUICKSTART.md](https://github.com/hongxinge/ThinkAi/blob/main/QUICKSTART.md)
+- 配置参考: [config.example.yaml](https://github.com/hongxinge/ThinkAi/blob/main/config.example.yaml)
+- 发布指引: [RELEASE_GUIDE.md](https://github.com/hongxinge/ThinkAi/blob/main/RELEASE_GUIDE.md)
+- 以上文档同时随源码包分发（sdist）
 
 ## 版本历史
+
+### v0.8.0 (2026-11-10) - 企业级加固与易用性改进
+
+- **依赖治理**：移除未使用的官方 SDK 依赖，补齐 `redis` / `uvicorn` / `Pillow`，新增 pytest 配置与测试隔离门禁。
+- **正确性**：缓存键纳入 tools 与采样参数；`Retry-After` 生效、5xx 纳入重试、消除双重等待；三个文本分割器统一参数校验与空输入契约；`chat_stream` 显式支持 `tools`；MCP 工具保留 `inputSchema`。
+- **配置与易用性**：YAML 支持 `${VAR}` 插值与 `.env` API Key 映射；`switch_provider` 支持凭据透传；RAG 默认改为零依赖内存向量库、支持持久化库复用与增量索引；公开常用类导出。
+- **安全与并发**：沙箱改用 `call_soon_threadsafe` 与局部 stdout 捕获；新增 SQL 只读选项、HTTP 主机白名单、图像路径限制、记忆文件原子替换；多 Agent 并发上限与执行统计生效。
+- **回归**：新增 31 个回归用例，全量 **293 个测试通过**。
 
 ### v0.7.1 (2026-09-26) - 稳定性大版本: 21项缺陷修复
 

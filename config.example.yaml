@@ -71,7 +71,7 @@ rag:
   chunk_overlap: 50
   top_k: 5
   embedding_model: "nomic-embed-text"
-  vector_store: "chroma"
+  vector_store: "memory"  # 默认零依赖；改为 chroma 需安装可选依赖 pip install "thinkai-framework[rag]"
   vector_store_path: "./thinkai_data/vectors"
 
 # Agent配置

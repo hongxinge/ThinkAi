@@ -140,7 +140,13 @@ class MemoryStateStorage(StateStorage):
 
 
 class PersistentAgentMixin:
-    """为Agent添加状态持久化能力"""
+    """为Agent添加状态存取能力。
+
+    当前实现只负责 AgentState 的保存/恢复/暂停，并未接入
+    FunctionCallingAgent / ReActAgent 的执行循环（两者使用局部
+    messages 变量）。如需断点续跑，请在自定义 Agent 子类中读取
+    self._state.messages 并恢复对话上下文。
+    """
 
     _state: Optional[AgentState] = None
 

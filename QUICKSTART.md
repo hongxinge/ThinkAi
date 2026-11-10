@@ -1,6 +1,6 @@
 # ThinkAi 快速开始指南
 
-> 当前版本: **v0.7.1** | 安装最新版: `pip install thinkai-framework --upgrade`
+> 当前版本: **v0.8.0** | 安装最新版: `pip install thinkai-framework --upgrade`
 
 ## 环境要求
 
@@ -25,7 +25,7 @@ pip install -e ".[all]"
 ### 方式2: 安装必要依赖
 
 ```bash
-pip install fastapi uvicorn pydantic pydantic-settings httpx pyyaml python-dotenv tenacity
+pip install -e ".[web]"
 ```
 
 ## 第二步: 配置AI模型

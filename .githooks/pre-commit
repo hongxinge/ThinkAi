@@ -1,0 +1,18 @@
+#!/bin/sh
+# 凭据文件提交拦截
+# 启用方式(每个克隆执行一次): git config core.hooksPath .githooks
+# 只检查本次暂存的文件,不扫描历史。
+
+staged=$(git diff --cached --name-only --diff-filter=ACM) || exit 1
+
+for f in $staged; do
+  case "$f" in
+    .pypirc|*/.pypirc|.pypirc.*|*/.pypirc.*|.env|*/.env|*.pem|*.key)
+      echo "拒绝提交: $f 属于凭据/敏感文件" >&2
+      echo "请将凭据放在用户主目录并用环境变量注入,不要放入项目目录。" >&2
+      exit 1
+      ;;
+  esac
+done
+
+exit 0

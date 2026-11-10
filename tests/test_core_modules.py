@@ -425,11 +425,10 @@ class TestTextSplitter:
         assert chunks[0] == text
 
     def test_character_splitter_empty_text(self):
+        # 空文本契约统一为「无分块」，与 RecursiveSplitter / TokenSplitter 一致
         from thinkai.rag.text_splitter import CharacterSplitter
         splitter = CharacterSplitter(chunk_size=10, chunk_overlap=2)
-        chunks = splitter.split("")
-        assert len(chunks) == 1
-        assert chunks[0] == ""
+        assert splitter.split("") == []
 
     def test_token_splitter_english(self):
         from thinkai.rag.text_splitter import TokenSplitter

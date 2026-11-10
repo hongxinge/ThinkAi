@@ -2,7 +2,7 @@
 from typing import Tuple, Type
 from thinkai.core.models import ChatRequest, ChatResponse
 from thinkai.middleware.base import BaseMiddleware
-from thinkai.exceptions import APIError, RateLimitError
+from thinkai.exceptions import APIConnectionError, APIError, RateLimitError
 
 
 class RetryMiddleware(BaseMiddleware):
@@ -13,7 +13,10 @@ class RetryMiddleware(BaseMiddleware):
         max_retries: int = 3,
         delay: float = 1.0,
         backoff_factor: float = 2.0,
-        retryable_errors: Tuple[Type[Exception], ...] = (APIError, RateLimitError),
+        # 5xx 在 BaseProvider 中映射为 APIConnectionError，必须纳入可重试集合
+        retryable_errors: Tuple[Type[Exception], ...] = (
+            APIConnectionError, APIError, RateLimitError,
+        ),
     ):
         self.max_retries = max_retries
         self.delay = delay

@@ -339,6 +339,9 @@ class MCPAdapter:
             name=mcp_tool.name,
             description=mcp_tool.description,
             func=mcp_tool_wrapper,
+            # 不传 parameters 时 Tool 会从 **kwargs 推断出空的
+            # {"kwargs": ...} schema，导致 MCP Server 的 inputSchema 丢失。
+            parameters=mcp_tool.input_schema,
         )
 
 

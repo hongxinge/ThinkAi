@@ -91,9 +91,11 @@ class RateLimitMiddleware(BaseMiddleware):
         return response
 
     async def process_error(self, error: Exception):
-        """释放并发信号量;若为RateLimitError则等待重试"""
+        """释放并发信号量。
+
+        等待统一由 ThinkAI.chat() 的重试循环负责（会优先采用上游
+        Retry-After），此处若再 sleep 会造成双重等待。
+        """
         self._concurrent._semaphore.release()
         if isinstance(error, RateLimitError):
-            retry_after = getattr(error, "retry_after", None) or 1
-            logger.warning(f"Rate limit hit, waiting {retry_after}s before retry")
-            await asyncio.sleep(retry_after)
+            logger.warning("Rate limit hit: %s", error.message)

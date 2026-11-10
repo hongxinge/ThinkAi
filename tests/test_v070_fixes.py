@@ -895,13 +895,16 @@ class TestMapSdkException:
 # ---------------------------------------------------------------------------
 
 class TestRedisStorageModule:
+    """Redis 用例统一用 importorskip 做依赖门禁。
+
+    redis 为 RedisStorage 构造器内的延迟导入，模块本身始终可 import，
+    因此旧版把 skip 判定放在 `from ... import` 处永远不会触发，
+    直到构造时才抛 ImportError 导致用例失败。
+    """
+
     def test_module_importable(self):
-        try:
-            from thinkai.session.redis import RedisStorage
-        except ImportError as e:
-            if "redis" in str(e) and "pip install" in str(e):
-                pytest.skip("redis package not installed")
-            raise
+        pytest.importorskip("redis")
+        from thinkai.session.redis import RedisStorage
 
         # 构造不发起真实连接(redis.asyncio.from_url为惰性连接)
         storage = RedisStorage(url="redis://127.0.0.1:6379/0")
@@ -909,13 +912,8 @@ class TestRedisStorageModule:
 
     def test_missing_url_raises_friendly_config_error(self):
         """redis_url未配置时给出友好的配置错误提示,而非redis库裸ValueError"""
-        try:
-            from thinkai.session.redis import RedisStorage
-        except ImportError as e:
-            if "redis" in str(e) and "pip install" in str(e):
-                pytest.skip("redis package not installed")
-            raise
-
+        pytest.importorskip("redis")
+        from thinkai.session.redis import RedisStorage
         from thinkai.exceptions import ConfigurationError
 
         with pytest.raises(ConfigurationError) as exc_info:
@@ -927,13 +925,9 @@ class TestRedisStorageModule:
 
     def test_storage_dispatch_in_manager(self):
         """manager按配置正确分发到redis存储(仅验证分发逻辑,不连接)"""
+        pytest.importorskip("redis")
         from thinkai.session.manager import SessionManager
         from thinkai.session.storage import BaseStorage
-
-        try:
-            import redis  # noqa: F401
-        except ImportError:
-            pytest.skip("redis package not installed")
 
         manager = SessionManager(
             SessionConfig(storage="redis", redis_url="redis://127.0.0.1:6379/0")

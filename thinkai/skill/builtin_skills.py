@@ -32,16 +32,22 @@ class BaseSkillMixin:
 
 
 class DatabaseSkill(BaseSkillMixin):
-    """数据库操作 Skill - SQLite 查询"""
+    """数据库操作 Skill - SQLite 查询
+
+    readonly=True 时仅允许只读语句，用于把 LLM 生成的 SQL 限制在安全范围，
+    避免 DROP / DELETE / ATTACH 等破坏性操作。
+    """
 
     name = "database"
     description = "Query and manage SQLite databases"
 
-    def __init__(self, db_path: str = ":memory:"):
+    def __init__(self, db_path: str = ":memory:", readonly: bool = False):
         self.db_path = db_path
+        self.readonly = readonly
 
     def get_tools(self) -> List[Tool]:
         import sqlite3
+        readonly = self.readonly
 
         def execute_sql(query: str, db_path: Optional[str] = None) -> str:
             """Execute a SQL query and return results.
@@ -50,6 +56,11 @@ class DatabaseSkill(BaseSkillMixin):
                 query: SQL query to execute
                 db_path: Database file path (optional, uses default if not provided)
             """
+            statement = query.strip().upper()
+            if readonly and not statement.startswith(("SELECT", "PRAGMA", "EXPLAIN", "WITH")):
+                return json.dumps({
+                    "error": "readonly mode: only SELECT/PRAGMA/EXPLAIN/WITH is allowed"
+                })
             try:
                 path = db_path or self.db_path
                 conn = sqlite3.connect(path)
@@ -108,13 +119,21 @@ class DatabaseSkill(BaseSkillMixin):
 
 
 class APISkill(BaseSkillMixin):
-    """API 调用 Skill - HTTP 请求"""
+    """API 调用 Skill - HTTP 请求
+
+    allowed_hosts 非空时仅允许访问白名单主机，用于约束 SSRF 风险。
+    """
 
     name = "api"
     description = "Make HTTP API requests"
 
+    def __init__(self, allowed_hosts: Optional[List[str]] = None):
+        self.allowed_hosts = allowed_hosts
+
     def get_tools(self) -> List[Tool]:
         import httpx
+        from urllib.parse import urlparse
+        allowed_hosts = self.allowed_hosts
 
         async def http_request(
             method: str = "GET",
@@ -133,6 +152,12 @@ class APISkill(BaseSkillMixin):
                 query_params: JSON string of query parameters
             """
             try:
+                if allowed_hosts:
+                    host = urlparse(url).hostname or ""
+                    if host not in allowed_hosts:
+                        return json.dumps({
+                            "error": f"Access denied: host '{host}' is not in allowed_hosts"
+                        })
                 headers_dict = json.loads(headers) if headers else {}
                 params_dict = json.loads(query_params) if query_params else {}
                 body_dict = json.loads(body) if body else None
@@ -186,18 +211,42 @@ class APISkill(BaseSkillMixin):
 
 
 class ImageSkill(BaseSkillMixin):
-    """图像处理 Skill - 基础操作"""
+    """图像处理 Skill - 基础操作
+
+    传入 allowed_dirs 后，文件读取与目录列举都会限制在指定目录内；
+    默认不限制以保持向后兼容，生产环境建议显式配置。
+    """
 
     name = "image"
     description = "Process and analyze images"
 
+    def __init__(self, allowed_dirs: Optional[List[str]] = None):
+        self.allowed_dirs = [
+            os.path.normcase(os.path.abspath(d)) for d in (allowed_dirs or [])
+        ]
+
     def get_tools(self) -> List[Tool]:
+        allowed_dirs = self.allowed_dirs
+
+        def _deny_if_outside(target: str) -> Optional[str]:
+            if not allowed_dirs:
+                return None
+            abs_path = os.path.normcase(os.path.abspath(target))
+            if not any(_is_path_within(abs_path, d) for d in allowed_dirs):
+                return json.dumps({
+                    "error": f"Access denied: path '{target}' is outside allowed_dirs"
+                })
+            return None
+
         def image_info(file_path: str) -> str:
             """Get image file information.
 
             Args:
                 file_path: Path to the image file
             """
+            denied = _deny_if_outside(file_path)
+            if denied:
+                return denied
             try:
                 path = Path(file_path)
                 if not path.exists():
@@ -234,6 +283,9 @@ class ImageSkill(BaseSkillMixin):
             Args:
                 file_path: Path to the image file
             """
+            denied = _deny_if_outside(file_path)
+            if denied:
+                return denied
             try:
                 with open(file_path, "rb") as f:
                     data = base64.b64encode(f.read()).decode("utf-8")
@@ -247,6 +299,9 @@ class ImageSkill(BaseSkillMixin):
             Args:
                 directory: Directory to search
             """
+            denied = _deny_if_outside(directory)
+            if denied:
+                return denied
             try:
                 path = Path(directory)
                 image_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}

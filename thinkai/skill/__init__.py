@@ -7,7 +7,6 @@ import os
 import io
 import asyncio
 import threading
-import contextlib
 
 from thinkai.agent.tool import Tool, tool
 from thinkai.agent.function_calling import FunctionCallingAgent
@@ -69,10 +68,18 @@ class Skill:
 
 
 class WebSearchSkill(Skill):
-    """网页搜索Skill"""
+    """网页搜索Skill。
+
+    默认返回占位提示文本；生产环境请通过 search_func 注入真实搜索后端，
+    或在 SkillManager 中替换为自定义 Skill，避免把占位结果当作真实检索。
+    """
 
     name = "web_search"
     description = "Search the web for information"
+
+    def __init__(self, search_func: Optional[Callable] = None, **kwargs):
+        super().__init__(**kwargs)
+        self.search_func = search_func
 
     def get_tools(self) -> List[Tool]:
         def search(query: str, num_results: int = 5) -> str:
@@ -82,6 +89,8 @@ class WebSearchSkill(Skill):
                 query: The search query
                 num_results: Number of results to return (default: 5)
             """
+            if self.search_func is not None:
+                return self.search_func(query, num_results)
             return f"[Search results for '{query}'] (需要实现实际搜索API)"
 
         return [
@@ -174,13 +183,21 @@ class CodeSkill(Skill):
                 if validator.errors:
                     return f"SafetyError: {validator.errors[0]}. Imports, file access, and system calls are not allowed in sandbox mode."
 
-                safe_globals = {"__builtins__": _SAFE_BUILTINS}
+                # 用局部 print 捕获输出，避免 redirect_stdout 修改全局
+                # sys.stdout 后在并发线程间互相串扰。
+                safe_builtins = dict(_SAFE_BUILTINS)
+                stdout_capture = io.StringIO()
+
+                def _sandbox_print(*args, **kwargs):
+                    kwargs["file"] = stdout_capture
+                    print(*args, **kwargs)
+
+                safe_builtins["print"] = _sandbox_print
+                safe_globals = {"__builtins__": safe_builtins}
                 local_vars = {}
 
                 compiled = compile(tree, "<sandbox>", "exec")
-                stdout_capture = io.StringIO()
-                with contextlib.redirect_stdout(stdout_capture):
-                    exec(compiled, safe_globals, local_vars)
+                exec(compiled, safe_globals, local_vars)
 
                 stdout_output = stdout_capture.getvalue().rstrip("\n")
                 explicit_result = "result" in local_vars or "_" in local_vars
@@ -221,21 +238,21 @@ class CodeSkill(Skill):
             loop = asyncio.get_running_loop()
             future = loop.create_future()
 
+            def _publish(setter, value):
+                # future 属于事件循环，跨线程写入必须经 call_soon_threadsafe；
+                # 直接 set_result 存在竞态且可能丢失唤醒。
+                def _apply():
+                    if not future.done():
+                        setter(value)
+                loop.call_soon_threadsafe(_apply)
+
             def _worker():
                 try:
                     result = _run_in_sandbox(code)
                 except BaseException as exc:
-                    try:
-                        if not future.cancelled():
-                            future.set_exception(exc)
-                    except asyncio.InvalidStateError:
-                        pass
+                    _publish(future.set_exception, exc)
                     return
-                try:
-                    if not future.cancelled():
-                        future.set_result(result)
-                except asyncio.InvalidStateError:
-                    pass
+                _publish(future.set_result, result)
 
             # 独立守护线程执行,超时后放弃等待,不阻塞事件循环
             thread = threading.Thread(

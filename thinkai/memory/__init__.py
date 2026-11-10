@@ -88,11 +88,17 @@ class FileMemoryStore(MemoryStore):
                     self._memories[memory.id] = memory
 
     def _save_to_file(self):
-        """保存到文件"""
+        """保存到文件（独立临时文件 + 原子替换）。
+
+        并发写入各自使用不同的临时文件，os.replace 保证 memories.json
+        始终是某一次完整快照，不会出现写一半被读到的损坏 JSON。
+        """
         memory_file = self.base_path / "memories.json"
+        tmp_file = self.base_path / f".memories.{uuid.uuid4().hex}.tmp"
         data = [m.to_dict() for m in self._memories.values()]
-        with open(memory_file, "w", encoding="utf-8") as f:
+        with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, memory_file)
         self._dirty = False
 
     def _persist(self) -> None:

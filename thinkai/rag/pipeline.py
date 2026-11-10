@@ -31,8 +31,8 @@ class RAGPipeline:
         chunk_overlap: Optional[int] = None,
         top_k: Optional[int] = None,
         embedding_model: Optional[str] = None,
-        embedding_provider: str = "simple",
-        vector_store: str = "chroma",
+        embedding_provider: Optional[str] = None,
+        vector_store: str = "memory",
         vector_store_path: str = "./thinkai_data/vectors",
         config: Optional[RAGConfig] = None,
         ai_client: Optional[Any] = None,
@@ -77,19 +77,23 @@ class RAGPipeline:
         )
 
     def _init_embedding(self) -> BaseEmbedding:
-        if self.ai_client and hasattr(self.ai_client, 'default_provider'):
-            provider = self.ai_client.default_provider
-            if provider == "ollama":
-                return create_embedding("ollama", model=self.embedding_model)
-            elif provider in ("openai", "deepseek", "qwen"):
-                api_key = None
-                if self.ai_client._main_provider:
-                    api_key = self.ai_client._main_provider.api_key
-                return create_embedding(
-                    "openai",
-                    model=self.embedding_model,
-                    api_key=api_key or "",
-                )
+        # 显式指定时优先（旧实现完全忽略 embedding_provider 参数）
+        if self.embedding_provider is not None:
+            return create_embedding(
+                self.embedding_provider, model=self.embedding_model
+            )
+
+        # 自动推断：仅 Ollama 有确定的本地 embedding 端点。
+        if (
+            self.ai_client
+            and getattr(self.ai_client, "default_provider", None) == "ollama"
+        ):
+            return create_embedding("ollama", model=self.embedding_model)
+
+        # 其余 Provider 的 embedding 端点与模型名并不通用（旧实现会把
+        # Ollama 的 nomic-embed-text 发给 api.openai.com/v1），
+        # 因此默认回落到零依赖哈希实现；需要语义向量时请显式指定
+        # embedding_provider 与 embedding_model。
         return create_embedding("simple")
 
     async def load_and_split(self, documents: Optional[List[str]] = None) -> List[Dict[str, Any]]:
@@ -136,7 +140,11 @@ class RAGPipeline:
             metadatas=metadatas,
         )
 
-        self._chunk_metadata = metadatas
+        # 二次索引（add_document）应追加而非覆盖，保持元数据与向量库一致
+        if self.indexed:
+            self._chunk_metadata.extend(metadatas)
+        else:
+            self._chunk_metadata = metadatas
         self.indexed = True
 
     async def retrieve(self, query: str, top_k: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -150,9 +158,8 @@ class RAGPipeline:
         Returns:
             相关文档列表
         """
-        if not self.indexed:
-            return []
-
+        # 不再以实例内 indexed 标志短路：持久化向量库（如 ChromaStore）
+        # 在新进程/新实例中同样应当可检索；空库由向量存储自行返回 []。
         k = top_k if top_k is not None else self.top_k
         query_embedding = await self.embedding.embed_text(query)
         results = await self.vector_store.search(query_embedding, k)

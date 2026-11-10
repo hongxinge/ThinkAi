@@ -70,7 +70,19 @@ class ThinkAI:
         """
         # 加载配置
         self.config = config or Settings()
-        
+
+        # 显式传入的凭据写入配置，保证 switch_provider() 之后仍可复用
+        if api_key or api_base:
+            from thinkai.core.config import ProviderConfig
+            provider_cfg = self.config.providers.get(provider)
+            if provider_cfg is None:
+                provider_cfg = ProviderConfig()
+                self.config.providers[provider] = provider_cfg
+            if api_key:
+                provider_cfg.api_key = api_key
+            if api_base:
+                provider_cfg.api_base = api_base
+
         # 主Provider
         self.default_provider = provider
         self.default_model = model
@@ -309,7 +321,14 @@ class ThinkAI:
                     except Exception:
                         pass  # 中间件自身的异常不应掩盖原始异常
                 if retry_mw and retry_mw.is_retryable(e) and attempt < max_attempts - 1:
-                    delay = retry_mw.get_delay(attempt)
+                    # 上游给出 Retry-After 时优先采用，避免与固定指数退避叠加；
+                    # 限流中间件已不再自行等待，此处是唯一的等待点。
+                    upstream_delay = getattr(e, "retry_after", None)
+                    delay = (
+                        float(upstream_delay)
+                        if isinstance(upstream_delay, (int, float)) and upstream_delay > 0
+                        else retry_mw.get_delay(attempt)
+                    )
                     await asyncio.sleep(delay)
                     continue
                 raise
@@ -323,6 +342,7 @@ class ThinkAI:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         session_id: Optional[str] = None,
+        tools: Optional[List] = None,
         **kwargs,
     ) -> AsyncIterator[StreamChunk]:
         """
@@ -334,6 +354,8 @@ class ThinkAI:
             temperature: 温度参数
             max_tokens: 最大token数
             session_id: 会话ID,传入后自动维护多轮对话历史
+            tools: 工具定义。流式 Function Calling 需要显式传入，
+                   此前只能经 **kwargs 隐式透传，与 chat() 接口不一致
             **kwargs: 额外参数
 
         Returns:
@@ -353,6 +375,7 @@ class ThinkAI:
             temperature=temperature if temperature is not None else self.temperature,
             max_tokens=max_tokens or self.max_tokens,
             stream=True,
+            tools=tools,
             **kwargs,
         )
 
@@ -438,13 +461,22 @@ class ThinkAI:
         )
         return response.content or ""
 
-    async def switch_provider(self, provider: str, model: Optional[str] = None):
+    async def switch_provider(
+        self,
+        provider: str,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        api_base: Optional[str] = None,
+        **kwargs,
+    ):
         """
         切换Provider - 重建主Provider实例使其真正生效
 
         Args:
             provider: 新Provider名称
             model: 新模型名称(可选,不传则沿用当前模型)
+            api_key: 新Provider的API密钥(可选,不传则从配置/环境变量读取)
+            api_base: 新Provider的API地址(可选)
         """
         self.default_provider = provider
         if model:
@@ -453,7 +485,9 @@ class ThinkAI:
         old_provider = self._main_provider
         self._main_provider = None
         try:
-            self._init_main_provider()
+            self._init_main_provider(
+                api_key=api_key, api_base=api_base, **kwargs
+            )
         except Exception:
             # 切换失败时回滚,保持原Provider可用
             self._main_provider = old_provider

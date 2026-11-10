@@ -32,14 +32,28 @@ Thumbs.db
 .env
 *.env
 
-# Credentials
+# Credentials（凭据一律放用户主目录 ~/.pypirc，禁止放项目内）
+# 另见 .git/info/exclude 的本地级双保险，以及 .githooks/pre-commit 强制拦截
 .pypirc
+**/.pypirc
+.pypirc.*
+.env
+**/.env
+*.pem
+*.key
 
 # Distribution
 *.tar.gz
 *.whl
+.release-archive/
 
 AGENTS.md
 
 # Internal materials
 promotional/
+
+# WorkBuddy 平台数据（工作日志、会话记忆等，不纳入版本库）
+.workbuddy/
+
+# 本机环境资料（含账号/密码等敏感信息，禁止提交）
+本地资料.txt

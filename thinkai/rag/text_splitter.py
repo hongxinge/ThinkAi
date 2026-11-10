@@ -22,6 +22,9 @@ class CharacterSplitter(TextSplitter):
         self.chunk_overlap = max(0, min(chunk_overlap, self.chunk_size - 1))
 
     def split(self, text: str) -> List[str]:
+        # 空文本统一返回空列表（与 RecursiveSplitter / TokenSplitter 一致）
+        if not text:
+            return []
         if len(text) <= self.chunk_size:
             return [text]
 
@@ -42,8 +45,9 @@ class TokenSplitter(TextSplitter):
     """按Token分割(估算)"""
 
     def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50):
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
+        # 与 CharacterSplitter 保持相同的参数校验
+        self.chunk_size = max(1, chunk_size)
+        self.chunk_overlap = max(0, min(chunk_overlap, self.chunk_size - 1))
 
     def _count_tokens(self, text: str) -> int:
         """简单估算token数(中英文混合)"""
@@ -53,11 +57,13 @@ class TokenSplitter(TextSplitter):
         return english_words + chinese_chars
 
     def split(self, text: str) -> List[str]:
+        if not text:
+            return []
         chunks = []
         words = text.split()
         current_chunk = []
         current_size = 0
-        
+
         for word in words:
             word_size = len(word) + 1
             if current_size + word_size > self.chunk_size and current_chunk:
@@ -73,13 +79,13 @@ class TokenSplitter(TextSplitter):
                         break
                 current_chunk = overlap_words
                 current_size = overlap_size
-            
+
             current_chunk.append(word)
             current_size += word_size
-        
+
         if current_chunk:
             chunks.append(" ".join(current_chunk))
-        
+
         return chunks
 
 
@@ -87,9 +93,12 @@ class RecursiveSplitter(TextSplitter):
     """递归分割器 - 优先按段落,然后按句子,最后按字符"""
 
     def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50):
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
-        self.separators = ["\n\n", "\n", "。", ".", "!", "!", "?", "?", " ", ""]
+        # 参数校验：overlap >= size 时 _merge_splits 会回捞全部已累积片段，
+        # 导致单块远超 chunk_size；此处统一 clamp，与 CharacterSplitter 一致。
+        self.chunk_size = max(1, chunk_size)
+        self.chunk_overlap = max(0, min(chunk_overlap, self.chunk_size - 1))
+        # 去除重复的分隔符
+        self.separators = ["\n\n", "\n", "。", ".", "!", "?", " ", ""]
 
     def split(self, text: str) -> List[str]:
         return self._split_text(text, self.separators)
@@ -98,22 +107,30 @@ class RecursiveSplitter(TextSplitter):
         """递归分割"""
         if not text:
             return []
-        
+
         if len(text) <= self.chunk_size:
             return [text]
-        
+
         separator = separators[0] if separators else ""
         remaining_separators = separators[1:]
-        
+
         if separator:
             splits = text.split(separator)
         else:
             splits = list(text)
-        
-        # 如果分割后仍然太大,继续递归
-        if len(splits) > 1 and any(len(s) > self.chunk_size for s in splits):
-            return self._split_text(text, remaining_separators)
-        
+
+        # 任一片段仍超过 chunk_size 时，继续用更细的分隔符递归。
+        # 旧实现额外要求 len(splits) > 1，导致「整段文本不含任何分隔符」
+        # 时被直接合并成一个超长块（实测 40 字符文本产出 42 字符单块）。
+        if any(len(s) > self.chunk_size for s in splits):
+            if remaining_separators:
+                return self._split_text(text, remaining_separators)
+            # 分隔符已用尽仍超长：按 chunk_size 硬切兜底
+            return [
+                text[i:i + self.chunk_size]
+                for i in range(0, len(text), self.chunk_size)
+            ]
+
         # 合并小块
         return self._merge_splits(splits, separator)
 
@@ -122,11 +139,11 @@ class RecursiveSplitter(TextSplitter):
         chunks = []
         current_chunk = []
         current_length = 0
-        
+
         for split in splits:
             split_with_sep = split + separator if separator else split
             split_len = len(split_with_sep)
-            
+
             if current_length + split_len > self.chunk_size and current_chunk:
                 chunks.append("".join(current_chunk))
                 # 保留重叠
@@ -140,11 +157,11 @@ class RecursiveSplitter(TextSplitter):
                         break
                 current_chunk = overlap
                 current_length = overlap_len
-            
+
             current_chunk.append(split_with_sep)
             current_length += split_len
-        
+
         if current_chunk:
             chunks.append("".join(current_chunk))
-        
+
         return chunks

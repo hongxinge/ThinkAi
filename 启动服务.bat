@@ -19,12 +19,12 @@ echo.
 
 REM 检查并安装依赖
 echo [2/3] 检查依赖包...
-pip show fastapi >nul 2>&1
+python -c "import thinkai, fastapi, uvicorn" >nul 2>&1
 if errorlevel 1 (
-    echo 正在安装依赖包(首次运行可能需要几分钟)...
-    pip install fastapi uvicorn pydantic pydantic-settings httpx pyyaml python-dotenv tenacity
+    echo 正在安装框架与Web依赖(首次运行可能需要几分钟)...
+    pip install -e ".[web]"
 ) else (
-    echo ✓ 依赖包已安装
+    echo ✓ 框架依赖已就绪
 )
 echo.
 

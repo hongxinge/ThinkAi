@@ -1,13 +1,32 @@
 """配置管理模块 - 支持环境变量、配置文件、多环境"""
 import os
+import re
 from pathlib import Path
-from typing import Dict, Optional, Any, List
+from typing import ClassVar, Dict, Optional, Any, List
 from pydantic import Field, model_validator, ConfigDict
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import yaml
 from dotenv import load_dotenv
 
 from thinkai.exceptions import ConfigurationError
+
+
+_ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _expand_env(value):
+    """递归展开配置中的 ${VAR} 占位符。
+
+    未定义的环境变量展开为空字符串，避免把 `${OPENAI_API_KEY}`
+    这类字面量当作真实密钥发给上游 API。
+    """
+    if isinstance(value, str):
+        return _ENV_PATTERN.sub(lambda m: os.getenv(m.group(1), ""), value)
+    if isinstance(value, dict):
+        return {k: _expand_env(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env(v) for v in value]
+    return value
 
 
 class ModelConfig(BaseSettings):
@@ -50,7 +69,7 @@ class RAGConfig(BaseSettings):
     chunk_overlap: int = 50
     top_k: int = 5
     embedding_model: str = "nomic-embed-text"
-    vector_store: str = "chroma"
+    vector_store: str = "memory"
     vector_store_path: str = "./thinkai_data/vectors"
 
 
@@ -99,17 +118,22 @@ class Settings(BaseSettings):
     @model_validator(mode="before")
     @classmethod
     def load_config_file(cls, values):
-        """加载配置文件"""
+        """加载配置文件并展开 ${VAR} 占位符。"""
+        # pydantic-settings 的 env_file 只作用于自身字段，不会写入
+        # os.environ；显式加载一次，让 .env 中的第三方 API Key 可被读取。
+        load_dotenv()
         config_file = values.get("config_file") or os.getenv("THINKAI_CONFIG_FILE")
-        
+
         if config_file and Path(config_file).exists():
             with open(config_file, "r", encoding="utf-8") as f:
                 file_config = yaml.safe_load(f) or {}
-            
+
+            file_config = _expand_env(file_config)
+
             for key, value in file_config.items():
                 if key not in values:
                     values[key] = value
-        
+
         return values
 
     def get_model_config(self, name: Optional[str] = None) -> ModelConfig:
@@ -124,11 +148,28 @@ class Settings(BaseSettings):
         
         return self.models[model_name]
 
+    # 常见 Provider 对应的 API Key 环境变量；
+    # 用 ClassVar 声明，避免被 Pydantic 当作模型字段解析。
+    PROVIDER_ENV_KEYS: ClassVar[Dict[str, str]] = {
+        "openai": "OPENAI_API_KEY",
+        "qwen": "QWEN_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "claude": "ANTHROPIC_API_KEY",
+        "gemini": "GOOGLE_API_KEY",
+        "glm": "ZHIPU_API_KEY",
+        "baidu": "BAIDU_API_KEY",
+    }
+
     def get_provider_config(self, provider: str) -> ProviderConfig:
-        """获取Provider配置"""
-        if provider not in self.providers:
-            return ProviderConfig()
-        return self.providers[provider]
+        """获取Provider配置；未显式配置 api_key 时回落到对应环境变量。"""
+        config = self.providers.get(provider)
+        if config is None:
+            config = ProviderConfig()
+        if not config.api_key:
+            env_name = self.PROVIDER_ENV_KEYS.get(provider)
+            if env_name:
+                config.api_key = os.getenv(env_name) or None
+        return config
 
     def register_model(self, name: str, config: Dict[str, Any]):
         """注册模型配置"""

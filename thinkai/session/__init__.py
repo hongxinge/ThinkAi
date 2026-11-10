@@ -3,10 +3,12 @@ from thinkai.session.manager import SessionManager
 from thinkai.session.storage import BaseStorage
 from thinkai.session.memory import MemoryStorage
 from thinkai.session.context import SessionContext
+from thinkai.session.redis import RedisStorage
 
 __all__ = [
     "SessionManager",
     "MemoryStorage",
     "BaseStorage",
     "SessionContext",
+    "RedisStorage",
 ]

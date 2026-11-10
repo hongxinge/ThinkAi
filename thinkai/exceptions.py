@@ -47,6 +47,9 @@ class APIError(ThinkAiError):
 class RateLimitError(ThinkAiError):
     """速率限制错误"""
     def __init__(self, provider: str, retry_after: Optional[int] = None):
+        # 显式保存上游 Retry-After，供重试策略读取；
+        # 此前只写进消息文本，导致重试与限流中间件都无法使用真实等待时间。
+        self.retry_after = retry_after
         retry_msg = f". Retry after {retry_after} seconds" if retry_after else ""
         super().__init__(
             message=f"Rate limit exceeded for {provider}{retry_msg}",
